@@ -1,0 +1,49 @@
+#include "Filter/KernelFilter.h"
+
+void DriverUnload(PDRIVER_OBJECT DirverObject)
+{
+    UNREFERENCED_PARAMETER(DirverObject);
+    DbgPrint("[Message]: The Driver start Unloading...\n");
+
+    if (IsAttachDevUp)
+        c2pUnload(DirverObject);
+
+    if(IsHookKbdIRP)
+        c2pHookUnload(DirverObject);
+}
+
+NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
+{
+    DbgPrint("[Message]: Start Load Driver!\n");
+    NTSTATUS nStatus = STATUS_SUCCESS;
+    if (!DriverObject)
+        return STATUS_UNSUCCESSFUL;
+
+    if (!RegistryPath)
+        return STATUS_UNSUCCESSFUL;
+
+    DriverObject->DriverUnload = DriverUnload;
+
+   // for (int i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; i++)
+    //    DriverObject->MajorFunction[i] = cwkDispatch;
+
+    DriverObject->MajorFunction[IRP_MJ_READ] = c2pDispatchRead;        // 读操作分发函数
+    DriverObject->MajorFunction[IRP_MJ_POWER] = c2pDispatchPower;    // 电源操作分发函数
+    DriverObject->MajorFunction[IRP_MJ_PNP] = c2pDispatchPNP;        // 设备插拔分发函数
+
+    ///* TODO: 设备栈顶层添加新设备*/
+    //nStatus = c2pAttachDevices(DriverObject, RegistryPath);
+    //if(!NT_SUCCESS(nStatus))
+    //    DbgPrint(("[Message]: Function c2pAttachDevices Init error, Dirver Load! \n"));
+
+
+    ///* TODO: 键盘类驱动IRP劫持 */
+    //c2pSetHookIrp(DriverObject);
+
+    nStatus = FindDriverObject(DriverObject);
+    DbgPrint(("[Message]: Function FindDriverObject Ret %x! \n"), nStatus);
+
+    //KdBreakPoint();
+
+    return STATUS_UNSUCCESSFUL;
+}
