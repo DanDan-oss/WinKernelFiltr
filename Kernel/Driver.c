@@ -1,13 +1,26 @@
 #include <ntddk.h>
-VOID DriverUnload(PDRIVER_OBJECT pDriver)
+
+VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 {
-	UNREFERENCED_PARAMETER(pDriver);
-	DbgPrint("Goodbye~\n");
+	if (DriverObject)
+		DbgPrint("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId());
+
+	return;
 }
-NTSTATUS DriverEntry(PDRIVER_OBJECT pDriver, PUNICODE_STRING pRegPath)
+
+NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
-	DbgPrint("Hello Driver!\n");
-	UNREFERENCED_PARAMETER(pRegPath);
-	pDriver->DriverUnload = DriverUnload;
+	KdBreakPoint();
+
+	DbgPrint("[dbg:%ws] Hello Kernel World\n", __FUNCTIONW__);
+	if (RegistryPath)
+		DbgPrint("[dbg:%ws]Driver RegistryPath:%wZ\n", __FUNCTIONW__, RegistryPath);
+	if (DriverObject)
+	{
+		DriverObject->DriverUnload = DriverUnload;
+
+		DbgPrint("[dbg:%ws]Driver Object Address:%p, Current IRQL=0x%u\n", __FUNCTIONW__, DriverObject, KeGetCurrentIrql());
+	}
+
 	return STATUS_SUCCESS;
 }

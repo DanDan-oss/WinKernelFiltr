@@ -3,7 +3,7 @@
 #include "resource.h"
 //#include <minwinbase.h>
 
-#define DriverPath TEXT("C:\\FirstDirver.sys")		// 驱动路径
+#define DriverPath TEXT("C:\\TEST\\FirstDirver.sys")		// 驱动路径
 #define SymbolicLinkName TEXT("\\\\.\\\\MyDev")		// 链接符号
 #define ServiceName TEXT("FirstDriver")				// 驱动服务名
 
