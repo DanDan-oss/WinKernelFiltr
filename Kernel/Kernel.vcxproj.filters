@@ -16,10 +16,21 @@
     <Filter Include="Filter">
       <UniqueIdentifier>{8a299a76-9972-4231-a9f9-c139e23fb9c4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Demo">
+      <UniqueIdentifier>{d366fcd8-221d-4134-8cca-fc819c218970}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Driver.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DEMO\demo.c">
+      <Filter>Demo</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DEMO\demo.h">
+      <Filter>Demo</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
