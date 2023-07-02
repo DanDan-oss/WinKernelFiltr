@@ -137,8 +137,152 @@ void ListOperate(void)
 	return;
 }
 
+
+
 void SpinLockOperate(void)
 {
+	/* 
+	typedef ULONG_PTR KSPIN_LOCK;		// 自旋锁类型, 本质指针类型
 	
+	void KeInitializeSpinLock(PKSPIN_LOCK SpinLock);		// 初始化自旋锁
+	void KeAcquireSpinLock(SpinLock,OldIrql);				// 宏函数,通过引发IRQL使自旋锁上锁
+		// 注意KSPIN_LOCK变量不能写成局部变量,因为这样每个线程都会有一个自己的KSPIN_LOCK，这个就会变的没有意义,应该写成全局使大家共用这个函数
+
+	VOID KeReleaseSpinLock (PKSPIN_LOCK SpinLock, KIRQL NewIrql);	// 释放自旋锁,还原正在运行的原始IRQL
+
+	PLIST_ENTRY ExInterlockedInsertHeadList(PLIST_ENTRY ListHead, PLIST_ENTRY ListEntry,PKSPIN_LOCK Lock);		// 使用自旋锁的方式往链表中添加节点,返回插入成功节点的指针
+	PLIST_ENTRY ExInterlockedRemoveHeadList(PLIST_ENTRY ListHead, PKSPIN_LOCK Lock);	// 用自旋锁的方式移除链表中第一个节点,成功将返回移除的节点指针返回
+
+	// 队列自旋锁
+	typedef struct _KLOCK_QUEUE_HANDLE {
+	KSPIN_LOCK_QUEUE LockQueue;
+	KIRQL OldIrql;
+	} KLOCK_QUEUE_HANDLE, *PKLOCK_QUEUE_HANDLE;
+
+	void KeAcquireInStackQueuedSpinLock(PKSPIN_LOCK SpinLock, PKLOCK_QUEUE_HANDLE LockHandle.);	// 获取队列自旋锁
+	void KeReleaseInStackQueuedSpinLock(PKLOCK_QUEUE_HANDLE LockHandle);	// 释放由KeAcquireInStackQueuedSpinLock获取的队列自旋锁
+	
+	*/
+
+	// TODO: 自旋锁配合链表使用
+	typedef struct _FILE_INFO
+	{
+		LIST_ENTRY m_ListEntry;
+		WCHAR m_strFileNmae[260];
+	}FILE_INFO, *PFILE_INFO;
+
+	static KSPIN_LOCK my_list_lock = { 0 };		//链表的锁,写成全局变量或者静态变量
+	KIRQL irql = 0;
+	UNREFERENCED_PARAMETER(irql);
+
+	LIST_ENTRY my_list_head = { 0 };			// 链表头
+	FILE_INFO my_file_info = { 0 };
+
+
+	KeInitializeSpinLock(&my_list_lock);
+	ExInterlockedInsertHeadList(&my_list_head, &my_file_info.m_ListEntry, &my_list_lock);
+
+	// 链表遍历
+	PLIST_ENTRY pListEntery = my_list_head.Flink;
+	while (pListEntery != &my_list_head)
+	{
+		/* 由于 pListEntery->Flink并不是直接指向下一个节点的结构头,而是LIST_ENTRY的位置,需要使用 CONTAINING_RECORD(Address, type, Field) 转换让pTestEntry指向结构头地址 */
+		PFILE_INFO pTestEntry = CONTAINING_RECORD(pListEntery, FILE_INFO, m_ListEntry);
+		if (!pTestEntry)
+			break;
+		DbgPrint("[dbg]: FileName= %ws \n", pTestEntry->m_strFileNmae);
+		pListEntery = pListEntery->Flink;
+	}
+
+	ExInterlockedRemoveHeadList(&my_list_head, &my_list_lock);
+	// 队列自旋锁
+	KSPIN_LOCK my_Queue_SpinLock = { 0 };
+	KLOCK_QUEUE_HANDLE my_lock_queue_handle = { 0 };
+	KeInitializeSpinLock(&my_Queue_SpinLock);
+
+	KeAcquireInStackQueuedSpinLock(&my_Queue_SpinLock, &my_lock_queue_handle);
+	// ... do something
+	KeReleaseInStackQueuedSpinLock(&my_lock_queue_handle);
+
+	return;
+}
+
+void MemoryOperate(void)
+{
+	/*
+	typedef enum _POOL_TYPE
+	{
+		NonPagedPool,
+		NonPagedPoolExecute,
+		PagedPool, 
+		NonPagedPoolNx,
+		...
+	}POOL_TYPE;
+
+
+	PVOID ExAllocatePoolWithTag(POOL_TYPE PoolType, SIZE_T NumberOfButes, ULONG Tag);	//分配指定类型的池内存，并返回指向已分配块的指针
+
+	PVOID (*PALLOCATE_FUNCTION)(POLL_TYPE PoolType, SIZE_T NumberOfBytes, ULONG Tag);	// 旁视列表申请内存回调函数原型
+	VOID (*PFREE_FUNCTION)(PVOID Buffer);					// 旁视列表释放内存回调函数原型
+	void ExInitializeNPagedLookasideListP(PNPAGED_LOOKASIDE_LIST Lookaside, PALLOCATE_FUNCTION Allocate, PFREE_FUNCTION Free, ULONG Flags, SIZE_T Size, ULONG Tag, USHORT Depth);	// 初始化旁视列表内存管理对象,Allocate和Free设置为NULL时,操作系统会使用默认的
+
+	NTSTATUS ExInitializeLookasideListEx(PLOOKASIDE_LIST_EX lookaside, PALLOCATE_FUNCTION Allocate, PFREE_FUNCTION_EX Free, POOL_TYPE PoolType, ULONG Flags, SIZE_T Size, ULONG Tag, USHORT Depath); 
+	*/
+
+	PNPAGED_LOOKASIDE_LIST pLookAsideList = NULL;
+	BOOLEAN bSucc = FALSE;
+	BOOLEAN bInit = FALSE;
+	PVOID pFirstMemory = NULL;
+	PVOID pSecondMemory = NULL;
+
+	do
+	{
+		if(NULL == (pLookAsideList = (PNPAGED_LOOKASIDE_LIST)ExAllocatePoolWithTag(NonPagedPool, sizeof(NPAGED_LOOKASIDE_LIST), 'a')))
+			break;
+		memset(pLookAsideList, 0, sizeof(NPAGED_LOOKASIDE_LIST));
+
+		// 初始化旁视列表对象
+		ExInitializeNPagedLookasideList(pLookAsideList, NULL, NULL, 0, 128, 'a', 0);
+		bInit = TRUE;
+
+		if(NULL == (pFirstMemory = ExAllocateFromNPagedLookasideList(pLookAsideList)))
+			break;
+		if (NULL == (pSecondMemory = ExAllocateFromNPagedLookasideList(pLookAsideList)))
+			break;
+
+		DbgPrint("[dbg]: First: %p, Second:%p\n", pFirstMemory, pSecondMemory);
+
+		// 释放pFirstMemory
+		ExFreeToNPagedLookasideList(pLookAsideList, pFirstMemory);
+
+		// 再次分配,查看内存是否是从刚通过旁视列表释放的内存
+		if (NULL == (pFirstMemory = ExAllocateFromNPagedLookasideList(pLookAsideList)))
+			break;
+
+		DbgPrint("[dbg]: ReAlloc First: %p, Second:%p\n", pFirstMemory);
+
+		bSucc = TRUE;
+	} while (FALSE);
+
+	if (pFirstMemory && pLookAsideList)
+	{
+		ExFreeToNPagedLookasideList(pLookAsideList, pFirstMemory);
+		pFirstMemory = NULL;
+	}
+	if (pSecondMemory && pLookAsideList)
+	{
+		ExFreeToNPagedLookasideList(pLookAsideList, pFirstMemory);
+		pFirstMemory = NULL;
+	}
+	if (bInit && pLookAsideList)
+	{
+		ExDeleteNPagedLookasideList(pLookAsideList);
+		bInit = FALSE;
+	}
+	if (pLookAsideList)
+	{
+		ExFreePoolWithTag(pLookAsideList, 'a');
+		pLookAsideList = NULL;
+	}
 	return;
 }
