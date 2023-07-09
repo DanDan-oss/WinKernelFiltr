@@ -1,6 +1,7 @@
-#include "demo.h"
+#include <ntifs.h>
 #include <ntddk.h>
 #include <Ntstrsafe.h>
+#include "demo.h"
 
 // TARGETLIBS=$(DDK_LIB_PATH)\ntstrsafe.lib
 
@@ -8,6 +9,9 @@ void DemoMain()
 {
 	StringOperate();
 	ListOperate();
+	SpinLockOperate();
+	MemoryOperate();
+	EventOperationSample();
 
 	KdBreakPoint();
 }
@@ -171,16 +175,15 @@ void SpinLockOperate(void)
 		WCHAR m_strFileNmae[260];
 	}FILE_INFO, *PFILE_INFO;
 
-	static KSPIN_LOCK my_list_lock = { 0 };		//链表的锁,写成全局变量或者静态变量
 	KIRQL irql = 0;
 	UNREFERENCED_PARAMETER(irql);
 
 	LIST_ENTRY my_list_head = { 0 };			// 链表头
 	FILE_INFO my_file_info = { 0 };
+	KSPIN_LOCK my_list_lock = { 0 };		//链表的锁,写成全局变量或者静态变量
 
-
-	KeInitializeSpinLock(&my_list_lock);
-	ExInterlockedInsertHeadList(&my_list_head, &my_file_info.m_ListEntry, &my_list_lock);
+	InitializeListHead(&my_list_head);
+	ExInterlockedInsertHeadList(&my_list_head, (PLIST_ENTRY)&my_file_info, &my_list_lock);
 
 	// 链表遍历
 	PLIST_ENTRY pListEntery = my_list_head.Flink;
@@ -271,13 +274,8 @@ void MemoryOperate(void)
 	}
 	if (pSecondMemory && pLookAsideList)
 	{
-		ExFreeToNPagedLookasideList(pLookAsideList, pFirstMemory);
-		pFirstMemory = NULL;
-	}
-	if (bInit && pLookAsideList)
-	{
-		ExDeleteNPagedLookasideList(pLookAsideList);
-		bInit = FALSE;
+		ExFreeToNPagedLookasideList(pLookAsideList, pSecondMemory);
+		pSecondMemory = NULL;
 	}
 	if (pLookAsideList)
 	{
@@ -285,4 +283,93 @@ void MemoryOperate(void)
 		pLookAsideList = NULL;
 	}
 	return;
+}
+
+BOOLEAN EventOperationSample()
+{
+/*
+	typedef enum _ACCESS_MASK {
+		EVENT_ALL_ACCESS, EVENT_QUERY_STATE, EVENT_MODIFY_STATE...
+	}ACCESS_MASK; // EVENT打开权限
+
+	typedef enum _EVENT_TYPE {
+		SynchronizationEvent, NotificationEvent, ...
+	}EVENT_TYPE; // EVENT类型
+
+	typedef enum _ObjectType	//指向对象类型的指针 
+	{
+		*ExEventObjectType,
+		* ExSemaphoreObjectType,
+		* IoFileObjectType,
+		* PsProcessType,
+		* PsThreadType,
+		* SeTokenObjectType,
+		* TmEnlistmentObjectType,
+		* TmResourceManagerObjectType,
+		* TmTransactionManagerObjectType,
+		* TmTransactionObjectType
+		// 如果 ObjectType 不是 NULL，则操作系统会验证提供的对象类型是否与 Handle 指定的对象的对象类型匹配 
+	}OBJECT_TYPE;
+
+*/
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	BOOLEAN bSucc = FALSE;
+	HANDLE hCreateEvent = NULL;
+	PVOID pCreateEventObject = NULL;
+	HANDLE hOpenEvent = NULL;
+	PVOID pOpenEventObject = NULL;
+
+	do
+	{
+		OBJECT_ATTRIBUTES objAttr = { 0 };
+		UNICODE_STRING uNameString = { 0 };
+
+		RtlInitUnicodeString(&uNameString, L"\\BaseNamedObjects\\TestEvent");
+		InitializeObjectAttributes(&objAttr, &uNameString, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+		KdBreakPoint();
+
+		//TODO: 创建Event对象
+		nStatus = ZwCreateEvent(&hCreateEvent, EVENT_ALL_ACCESS, &objAttr, SynchronizationEvent, FALSE);
+		if (NULL == hCreateEvent)
+		{
+			DbgPrint("[dbg]: ZwCreateEvent Faild! STATUS=%x \n", nStatus);
+			break;
+		}
+		nStatus = ObReferenceObjectByHandle(hCreateEvent, EVENT_ALL_ACCESS, *ExEventObjectType, KernelMode, &pCreateEventObject, NULL);
+		if (NULL == pCreateEventObject)
+		{
+			DbgPrint("[dbg]: ZwCreateEvent of ObReferenceObjectByHandle Faild! STATUS=%x \n" , nStatus);
+			break;
+		}
+
+		//TODO: 打开Event对象
+		nStatus = ZwOpenEvent(&hOpenEvent, EVENT_ALL_ACCESS, &objAttr);
+		if (NULL ==  hOpenEvent)
+		{
+			DbgPrint("[dbg]: ZwOpenEvent Faild! STATUS=%x \n", nStatus);
+			break;
+		}
+		nStatus = ObReferenceObjectByHandle(hOpenEvent, EVENT_ALL_ACCESS, *ExEventObjectType, KernelMode, &pOpenEventObject, NULL);
+		if (NULL == pOpenEventObject)
+		{
+			DbgPrint("[dbg]: ZwOpenEvent of ObReferenceObjectByHandle Faild! STATUS=%x \n", nStatus);
+			break;
+		}
+
+		DbgPrint("[dbg]: Create Handle:%p, Create Pointer=%p\n", hCreateEvent, pCreateEventObject);
+		DbgPrint("[dbg]: Open Handle:%p, Open Pointer=%p\n", hCreateEvent, pCreateEventObject);
+		bSucc = TRUE;
+	} while (FALSE);
+
+	if (pCreateEventObject)
+		ObDereferenceObject(pCreateEventObject);
+	if (hCreateEvent)
+		ZwClose(hCreateEvent);
+	if (pOpenEventObject)
+		ObDereferenceObject(pCreateEventObject);
+	if (hOpenEvent)
+		ZwClose(hOpenEvent);
+
+	return bSucc;
 }
