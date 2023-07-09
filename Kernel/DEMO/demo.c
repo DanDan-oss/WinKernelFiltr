@@ -5,20 +5,24 @@
 
 // TARGETLIBS=$(DDK_LIB_PATH)\ntstrsafe.lib
 
+extern PDRIVER_OBJECT g_poDriverObject;
+extern PUNICODE_STRING g_psRegistryPath;
+
 void DemoMain()
 {
-	StringOperate();
-	ListOperate();
-	SpinLockOperate();
-	MemoryOperate();
+	StringOperationSample();
+	ListOperationSample();
+	SpinLockOperationSample();
+	MemoryOperationSample();
 	EventOperationSample();
+	RegistryKeyOperationSample();
 
 	KdBreakPoint();
 }
 
 
 /*	UNICODE_STRING 操作*/
-void StringOperate(void)
+void StringOperationSample(void)
 {
 	/*
 	typedef struct _UNICODE_STRING {
@@ -73,7 +77,7 @@ void StringOperate(void)
 
 
 /* LIST_ENTRY 链表结构操作 */
-void ListOperate(void)
+void ListOperationSample(void)
 {
 	
 	/*
@@ -143,7 +147,7 @@ void ListOperate(void)
 
 
 
-void SpinLockOperate(void)
+void SpinLockOperationSample(void)
 {
 	/* 
 	typedef ULONG_PTR KSPIN_LOCK;		// 自旋锁类型, 本质指针类型
@@ -210,7 +214,7 @@ void SpinLockOperate(void)
 	return;
 }
 
-void MemoryOperate(void)
+void MemoryOperationSample(void)
 {
 	/*
 	typedef enum _POOL_TYPE
@@ -327,8 +331,6 @@ BOOLEAN EventOperationSample()
 		RtlInitUnicodeString(&uNameString, L"\\BaseNamedObjects\\TestEvent");
 		InitializeObjectAttributes(&objAttr, &uNameString, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
 
-		KdBreakPoint();
-
 		//TODO: 创建Event对象
 		nStatus = ZwCreateEvent(&hCreateEvent, EVENT_ALL_ACCESS, &objAttr, SynchronizationEvent, FALSE);
 		if (NULL == hCreateEvent)
@@ -373,3 +375,93 @@ BOOLEAN EventOperationSample()
 
 	return bSucc;
 }
+
+BOOLEAN RegistryKeyOperationSample()
+{
+
+	PUNICODE_STRING pRegistryPath = g_psRegistryPath;
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	BOOLEAN bStatus = FALSE;
+
+	HANDLE hKey = NULL;
+	PKEY_VALUE_PARTIAL_INFORMATION pKeyDate = NULL;
+	UNICODE_STRING usKeyValueName = { 0 };
+	UNICODE_STRING usKeyValueText = { 0 };
+	ULONG ulNewStartValue = 0;
+
+	OBJECT_ATTRIBUTES ObjAttr = { 0 };
+	ULONG ulDisposition = 0;
+
+	InitializeObjectAttributes(&ObjAttr, pRegistryPath, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+	do
+	{
+		// 打开注册表
+		nStatus = ZwCreateKey(&hKey, KEY_ALL_ACCESS, &ObjAttr, 0, NULL, REG_OPTION_VOLATILE, &ulDisposition);
+		if (!NT_SUCCESS(nStatus))
+		{
+			DbgPrint("[dbg]: Create RegistryKey Faild! STATUS=%x \n", nStatus);
+			return FALSE;
+		}
+
+		// 修改注册表值
+		ulNewStartValue = 2;
+		RtlInitUnicodeString(&usKeyValueName, L"Start");
+		nStatus = ZwSetValueKey(hKey, &usKeyValueName, 0, REG_DWORD, (PVOID)&ulNewStartValue, sizeof(ulNewStartValue));
+		if (!NT_SUCCESS(nStatus))
+		{
+			DbgPrint("[dbg]: Set RegistryKey  \"Start\" Faild! STATUS=%x \n", nStatus);
+			bStatus = FALSE;
+			break;
+		}
+		RtlInitUnicodeString(&usKeyValueName, L"UserName");
+		RtlInitUnicodeString(&usKeyValueText, L"Mohui");
+		nStatus = ZwSetValueKey(hKey, &usKeyValueName, 0, REG_EXPAND_SZ, (PVOID)usKeyValueText.Buffer, usKeyValueText.Length);
+		if (!NT_SUCCESS(nStatus))
+		{
+			DbgPrint("[dbg]: Set RegistryKey  \"UserName\" Faild! STATUS=%x \n", nStatus);
+			bStatus = FALSE;
+			break;
+		}
+
+		// 读取注册表,
+		// 由于不知道键值的大小,先使用ZwQueryValueKey(,,KeyValuePartialInformation,NULL,0,&datasize) 读取键值信息
+		// ZwQueryValueKey()函数会返回STATUS_BUFFER_TOO_SMALL空间不足,并且datasize会被赋值键值vaule所需要的内存大小
+		RtlInitUnicodeString(&usKeyValueName, L"ImagePath");
+		ulNewStartValue = 0;
+		nStatus = ZwQueryValueKey(hKey, &usKeyValueName, KeyValuePartialInformation, NULL, 0, &ulNewStartValue);
+		if (0 == ulNewStartValue || nStatus != STATUS_BUFFER_TOO_SMALL)
+		{
+			DbgPrint("[dbg]: ZwQueryValueKey Get key Information  Faild! STATUS=%x \n", nStatus);
+			bStatus = FALSE;
+			break;
+		}
+
+		pKeyDate = (PKEY_VALUE_PARTIAL_INFORMATION)ExAllocatePoolWithTag(PagedPool, ulNewStartValue, 'DriF');
+		if (!pKeyDate)
+		{
+			DbgPrint("[dbg]: ExAllocatePoolWithTag Kye memory Faild! STATUS=%x \n", nStatus);
+			bStatus = FALSE;
+			break;
+		}
+		memset(pKeyDate, 0, ulNewStartValue);
+		// 再次读取注册表
+		nStatus = ZwQueryValueKey(hKey, &usKeyValueName, KeyValuePartialInformation, (PVOID)pKeyDate, ulNewStartValue, &ulNewStartValue);
+		if (!NT_SUCCESS(nStatus))
+		{
+			DbgPrint("[dbg]: ZwQueryValueKey Read Kye Faild! STATUS=%x \n", nStatus);
+			bStatus = FALSE;
+			break;
+		}
+
+		DbgPrint("[dbg]: Registry:%wZ, ValueName:%wZ, Value:%ws dataLen=%d\n", pRegistryPath, &usKeyValueName, (PWCHAR)pKeyDate->Data, pKeyDate->DataLength);
+		bStatus = TRUE;
+	} while (FALSE);
+
+	if (pKeyDate)
+		ExFreePoolWithTag(pKeyDate, 'DriF');
+	if(hKey)
+		ZwClose(hKey);
+	return bStatus;
+}
+
