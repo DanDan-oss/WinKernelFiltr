@@ -2,7 +2,7 @@
 
 extern void DbgMessagOut(WCHAR*);
 
-void CALLBACK DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
+void CALLBACK RegisterKey::DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
 {
 	SC_HANDLE scMagerHand = NULL;
 	SC_HANDLE scSevHand = NULL;
@@ -10,7 +10,7 @@ void CALLBACK DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
 	scMagerHand = OpenSCManagerW(NULL, SERVICES_ACTIVE_DATABASE, SC_MANAGER_ALL_ACCESS);
 	if (!scMagerHand)
 	{
-		DbgMessagOut(TEXT("系统服务管理器打开失败,管理员权限运行..."));
+		DbgMessagOut((PWCHAR)TEXT("系统服务管理器打开失败,管理员权限运行..."));
 		return;
 	}
 	do
@@ -18,7 +18,7 @@ void CALLBACK DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
 		scSevHand = OpenServiceW(scMagerHand, DeviceName, SERVICE_ALL_ACCESS);
 		if (scSevHand)
 		{
-			DbgMessagOut(TEXT("注册失败驱动服务已存在..."));
+			DbgMessagOut((PWCHAR)TEXT("注册失败驱动服务已存在..."));
 			break;
 		}
 		scSevHand = CreateServiceW(scMagerHand, DeviceName, DeviceName, SERVICE_ALL_ACCESS,
@@ -31,7 +31,7 @@ void CALLBACK DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
 			DbgMessagOut(ErrorMes);
 			break;
 		}else
-			DbgMessagOut(TEXT("驱动服务注册成功..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动服务注册成功..."));
 
 		CloseServiceHandle(scSevHand);
 
@@ -41,7 +41,7 @@ void CALLBACK DiverRegister(WCHAR* DiverPath, WCHAR* DeviceName)
 }
 
 
-void CALLBACK DiverDelete(WCHAR* DevName)
+void CALLBACK RegisterKey::DiverDelete(WCHAR* DevName)
 {
 	SC_HANDLE scMagerHand = NULL;
 	SC_HANDLE scSevHand = NULL;
@@ -49,7 +49,7 @@ void CALLBACK DiverDelete(WCHAR* DevName)
 	scMagerHand = OpenSCManagerW(NULL, SERVICES_ACTIVE_DATABASE, SC_MANAGER_ALL_ACCESS);
 	if (!scMagerHand)
 	{
-		DbgMessagOut(TEXT("系统服务管理器打开失败,管理员权限运行..."));
+		DbgMessagOut((PWCHAR)TEXT("系统服务管理器打开失败,管理员权限运行..."));
 		return;
 	}
 
@@ -58,7 +58,7 @@ void CALLBACK DiverDelete(WCHAR* DevName)
 		scSevHand = OpenServiceW(scMagerHand, DevName, SERVICE_ALL_ACCESS);
 		if (!scSevHand)
 		{
-			DbgMessagOut(TEXT("驱动卸载失败,未找到驱动服务..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动卸载失败,未找到驱动服务..."));
 			break;
 		}
 		if (!DeleteService(scSevHand))
@@ -68,7 +68,7 @@ void CALLBACK DiverDelete(WCHAR* DevName)
 			DbgMessagOut(szError);
 		}
 		else
-			DbgMessagOut(TEXT("驱动服务删除成功..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动服务删除成功..."));
 
 		CloseServiceHandle(scSevHand);
 	} while (FALSE);
@@ -77,7 +77,7 @@ void CALLBACK DiverDelete(WCHAR* DevName)
 	return;
 }
 
-void CALLBACK DriverRun(WCHAR* DevName)
+void CALLBACK RegisterKey::DriverRun(WCHAR* DevName)
 {
 	SC_HANDLE scMagerHand = NULL;
 	SC_HANDLE scSevHand = NULL;
@@ -85,7 +85,7 @@ void CALLBACK DriverRun(WCHAR* DevName)
 	scMagerHand = OpenSCManagerW(NULL, SERVICES_ACTIVE_DATABASE, SC_MANAGER_ALL_ACCESS);
 	if (!scMagerHand)
 	{
-		DbgMessagOut(TEXT("系统服务管理器打开失败,管理员权限运行..."));
+		DbgMessagOut((PWCHAR)TEXT("系统服务管理器打开失败,管理员权限运行..."));
 		return;
 	}
 
@@ -94,7 +94,7 @@ void CALLBACK DriverRun(WCHAR* DevName)
 		scSevHand = OpenServiceW(scMagerHand, DevName, SERVICE_ALL_ACCESS);
 		if (!scSevHand)
 		{
-			DbgMessagOut(TEXT("驱动启动错误,服务未注册..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动启动错误,服务未注册..."));
 			break;
 		}
 		if (!StartService(scSevHand, 0, 0))
@@ -105,7 +105,7 @@ void CALLBACK DriverRun(WCHAR* DevName)
 			break;
 		}
 		else
-			DbgMessagOut(TEXT("驱动服务启动成功..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动服务启动成功..."));
 
 		CloseServiceHandle(scSevHand);
 	} while (FALSE);
@@ -114,7 +114,7 @@ void CALLBACK DriverRun(WCHAR* DevName)
 	return;
 }
 
-void CALLBACK DriverStop(WCHAR* DevName)
+void CALLBACK RegisterKey::DriverStop(WCHAR* DevName)
 {
 	SC_HANDLE scMagerHand = NULL;
 	SC_HANDLE scSevHand = NULL;
@@ -123,7 +123,7 @@ void CALLBACK DriverStop(WCHAR* DevName)
 	scMagerHand = OpenSCManagerW(NULL, SERVICES_ACTIVE_DATABASE, SC_MANAGER_ALL_ACCESS);
 	if (!scMagerHand)
 	{
-		DbgMessagOut(TEXT("系统服务管理器打开失败,管理员权限运行..."));
+		DbgMessagOut((PWCHAR)TEXT("系统服务管理器打开失败,管理员权限运行..."));
 		return;
 	}
 
@@ -132,7 +132,7 @@ void CALLBACK DriverStop(WCHAR* DevName)
 		scSevHand = OpenServiceW(scMagerHand, DevName, SERVICE_ALL_ACCESS);
 		if (!scSevHand)
 		{
-			DbgMessagOut(TEXT("驱动停止失败, 服务未找到..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动停止失败, 服务未找到..."));
 			break;
 		}
 		if (!ControlService(scSevHand, SERVICE_CONTROL_STOP, &SerStance))
@@ -142,10 +142,9 @@ void CALLBACK DriverStop(WCHAR* DevName)
 			DbgMessagOut(szError);
 		}
 		else
-			DbgMessagOut(TEXT("驱动服务停止成功..."));
+			DbgMessagOut((PWCHAR)TEXT("驱动服务停止成功..."));
 
 		CloseServiceHandle(scSevHand);
-
 	} while (FALSE);
 
 	CloseServiceHandle(scMagerHand);

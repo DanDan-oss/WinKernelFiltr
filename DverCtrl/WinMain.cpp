@@ -1,4 +1,6 @@
 #include <Windows.h>
+#include <string>
+#include <atlstr.h>
 #include "DiverCtrl.h"
 #include "resource.h"
 //#include <minwinbase.h>
@@ -28,7 +30,7 @@ HANDLE hdDirverSymb = NULL;						// 连接驱动设备的文件句柄
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevIntance, PCHAR szCmdLine, int iCmdShow)
 {
 	WinInstan = hInstance;
-	DialogBoxW(hInstance, MAKEINTRESOURCE(IDD_DIALOG_MAIN), NULL, DialogProc);
+	DialogBoxW(hInstance, MAKEINTRESOURCE(IDD_DIALOG_MAIN), NULL, (DLGPROC)DialogProc);
 }
 
 
@@ -62,18 +64,27 @@ BOOL CALLBACK DialogProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 void DlogInit(HWND hWnd)
 {
-	HWND menuHand = 0;			// 子控件句柄
-	menuHand = GetDlgItem(hWnd, IDC_EDIT1);
-	OutEditHand = menuHand;
-	menuHand = GetDlgItem(hWnd, IDC_EDIT_DIVERPATH);
-	SetWindowTextW(menuHand, DriverPath);
-	DbgMessagOut(TEXT("初始化驱动路径..."));
-	menuHand = GetDlgItem(hWnd, IDC_EDIT_SYMBOLICLINK);
-	SetWindowTextW(menuHand, SymbolicLinkName);
-	DbgMessagOut(TEXT("初始化驱动设备符号链接..."));
-	menuHand = GetDlgItem(hWnd, IDC_EDIT_SEVNAME);
-	SetWindowTextW(menuHand, ServiceName);
-	DbgMessagOut(TEXT("初始化驱动注册表名..."));
+	HWND hwLogHand = GetDlgItem(hWnd, IDC_EDIT1);			// 子控件句柄
+	HWND hwDriverPath = GetDlgItem(hWnd, IDC_EDIT_DIVERPATH);
+	HWND hwServerName = GetDlgItem(hWnd, IDC_EDIT_SEVNAME);
+	HWND hwSymbli = GetDlgItem(hWnd, IDC_EDIT_SYMBOLICLINK);
+	CStringW cswDriverPath;
+
+	::OutEditHand = hwLogHand;
+
+	DbgMessagOut((PWCHAR)TEXT("初始化驱动路径..."));
+
+	GetModuleFileName(NULL, cswDriverPath.GetBufferSetLength((MAX_PATH+1) * 2), (MAX_PATH+1) * 2);
+	cswDriverPath.ReleaseBuffer();
+	cswDriverPath = cswDriverPath.Left(cswDriverPath.ReverseFind('\\'));
+	SetWindowTextW(hwDriverPath, cswDriverPath+"\\FirstDirver.sys");
+
+	DbgMessagOut((PWCHAR)TEXT("初始化驱动设备符号链接..."));
+	SetWindowTextW(hwSymbli, SymbolicLinkName);
+
+	DbgMessagOut((PWCHAR)TEXT("初始化驱动注册表名..."));
+	SetWindowTextW(hwServerName, ServiceName);
+
 	SendMessage(hWnd, WM_SETICON, ICON_SMALL2, IDB_BITMAP2);
 
 	return;
@@ -103,7 +114,7 @@ void MenuOperation(HWND hWnd, WPARAM wParam, LPARAM lParam)
 		StopBtnDown(hWnd);
 		return;
 	case IDC_BTN_CLEAREDIT:
-		SetWindowTextW(OutEditHand, TEXT(""));
+		SetWindowTextW(::OutEditHand, TEXT(""));
 		return;
 
 	case IDC_BTN_OPENSYMB:
@@ -113,16 +124,16 @@ void MenuOperation(HWND hWnd, WPARAM wParam, LPARAM lParam)
 	case IDC_BTN_CLOSESYMB:
 		if (!hdDirverSymb)
 		{
-			DbgMessagOut(TEXT("未打开驱动符号链接"));
+			DbgMessagOut((PWCHAR)TEXT("未打开驱动符号链接"));
 			return;
 		}
-		DbgMessagOut(TEXT("驱动链接关闭"));
+		DbgMessagOut((PWCHAR)TEXT("驱动链接关闭"));
 		CloseHandle(hdDirverSymb);
 		hdDirverSymb = NULL;
 		return;
 	case IDC_BUTTON6:
 		if(DeviceIoControl(hdDirverSymb, DevReadCtrl, NULL, 0, NULL, 0, NULL, NULL))
-			DbgMessagOut(TEXT("控制码发生成功"));
+			DbgMessagOut((PWCHAR)TEXT("控制码发生成功"));
 		return;
 	default://
 		break;
@@ -181,7 +192,7 @@ void RegBtnDown(HWND hWnd)
 	if (!GetWindowTextW(MenuHand, szDevName, 50))
 		return;
 
-	DiverRegister(szFileName, szDevName);
+	RegisterKey::DiverRegister(szFileName, szDevName);
 }
 
 void DeBtnDown(HWND hWnd)
@@ -190,7 +201,7 @@ void DeBtnDown(HWND hWnd)
 	WCHAR szDevName[50] = { 0 };		// 驱动服务名
 	if (RunDriver)
 	{
-		DbgMessagOut(TEXT("驱动尚在运行,删除失败"));
+		DbgMessagOut((PWCHAR)TEXT("驱动尚在运行,删除失败"));
 		return;
 	}
 	MenuHand = GetDlgItem(hWnd, IDC_EDIT_SEVNAME);
@@ -199,7 +210,7 @@ void DeBtnDown(HWND hWnd)
 	if (!GetWindowTextW(MenuHand, szDevName, 50))
 		return;
 
-	DiverDelete(szDevName);
+	RegisterKey::DiverDelete(szDevName);
 	
 }
 
@@ -212,7 +223,7 @@ void RunBtnDown(HWND  hWnd)
 		return;
 	if (!GetWindowTextW(MenuHand, szDevName, 50))
 		return;
-	DriverRun(szDevName);
+	RegisterKey::DriverRun(szDevName);
 	RunDriver = TRUE;
 }
 
@@ -225,7 +236,7 @@ void StopBtnDown(HWND hWnd)
 		return;
 	if (!GetWindowTextW(MenuHand, szDevName, 50))
 		return;
-	DriverStop(szDevName);
+	RegisterKey::DriverStop(szDevName);
 	RunDriver = FALSE;
 }
 
@@ -235,12 +246,12 @@ void OpenSymb(HWND hWnd)
 	WCHAR FileDevName[50] = { 0 };
 	if (!RunDriver)
 	{
-		DbgMessagOut(TEXT("驱动设备尚未运行,无法打开服务号链接"));
+		DbgMessagOut((PWCHAR)TEXT("驱动设备尚未运行,无法打开服务号链接"));
 		return;
 	}
 	if (hdDirverSymb)
 	{
-		DbgMessagOut(TEXT("驱动设备链接已经打开,不用重复打开"));
+		DbgMessagOut((PWCHAR)TEXT("驱动设备链接已经打开,不用重复打开"));
 		return;
 	}
 		
@@ -251,7 +262,7 @@ void OpenSymb(HWND hWnd)
 	GetWindowTextW(menuHand, FileDevName, 50);
 	hdDirverSymb = OpenDriverSymb(FileDevName);
 	if(hdDirverSymb)
-		DbgMessagOut(TEXT("打开驱动设备链接成功"));
+		DbgMessagOut((PWCHAR)TEXT("打开驱动设备链接成功"));
 	return;
 }
 void DbgMessagOut(WCHAR* pBuff)

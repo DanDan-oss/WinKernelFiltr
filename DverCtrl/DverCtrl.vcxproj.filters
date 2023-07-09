@@ -15,10 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="WinMain.c">
+    <ClCompile Include="WinMain.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="DriverCtrl.c">
+    <ClCompile Include="DriverCtrl.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

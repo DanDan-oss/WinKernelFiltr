@@ -142,8 +142,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="DriverCtrl.c" />
-    <ClCompile Include="WinMain.c" />
+    <ClCompile Include="DriverCtrl.cpp" />
+    <ClCompile Include="WinMain.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DiverCtrl.h" />
