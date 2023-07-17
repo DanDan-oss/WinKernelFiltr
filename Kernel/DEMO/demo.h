@@ -11,6 +11,9 @@ void SpinLockOperationSample(void);	/* 内核自旋锁操作 */
 void MemoryOperationSample(void);	/* 内核内存池操作*/
 BOOLEAN EventOperationSample();		/* 内核event对象*/
 BOOLEAN RegistryKeyOperationSample();	// 内核操作注册表
+BOOLEAN FileOperationSample();		/* 文件操作*/
 
+
+NTSTATUS CopyFile(PUNICODE_STRING TargerPath, PUNICODE_STRING SourcePath);	// 两个文件互相拷贝
 
 #endif // !_DEMO_H

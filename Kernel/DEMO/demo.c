@@ -17,6 +17,8 @@ void DemoMain()
 	EventOperationSample();
 	RegistryKeyOperationSample();
 
+	FileOperationSample();
+
 	KdBreakPoint();
 }
 
@@ -266,7 +268,7 @@ void MemoryOperationSample(void)
 		if (NULL == (pFirstMemory = ExAllocateFromNPagedLookasideList(pLookAsideList)))
 			break;
 
-		DbgPrint("[dbg]: ReAlloc First: %p, Second:%p\n", pFirstMemory);
+		DbgPrint("[dbg]: ReAlloc First: %p\n", pFirstMemory);
 
 		bSucc = TRUE;
 	} while (FALSE);
@@ -463,5 +465,130 @@ BOOLEAN RegistryKeyOperationSample()
 	if(hKey)
 		ZwClose(hKey);
 	return bStatus;
+}
+
+BOOLEAN FileOperationSample()
+{
+	HANDLE hFileHandle = NULL;
+
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	BOOLEAN bStatus = FALSE;
+	OBJECT_ATTRIBUTES ObjAttr = { 0 };
+	IO_STATUS_BLOCK ioStatus = { 0 };
+	UNICODE_STRING SouFileName = RTL_CONSTANT_STRING(L"\\??\\C:\\TEST\\a.txt");
+	UNICODE_STRING TarFileName = RTL_CONSTANT_STRING(L"\\??\\C:\\TEST\\b.txt");
+	UNICODE_STRING usFileValue = { 0 };
+	LARGE_INTEGER offset = { 0 };
+
+
+	InitializeObjectAttributes(&ObjAttr, &SouFileName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+	// 以 FILE_OPEN_IF的方式打开,存在直接打开,不存在创建
+	nStatus = ZwCreateFile(&hFileHandle, GENERIC_ALL, &ObjAttr, &ioStatus, 0, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OVERWRITE_IF, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_RANDOM_ACCESS, NULL, 0);
+	if (!NT_SUCCESS(nStatus) || !hFileHandle)
+	{
+		DbgPrint("[dbg]: OpenFile is failed, PATH=%wZ\n", SouFileName);
+		return FALSE;
+	}
+		
+	
+	do
+	{
+		// 写文件
+		RtlInitUnicodeString(&usFileValue, L"hasidhkajshdkjsahdjkashdkjsahdjksahdjkas\nABCDEFG");
+		nStatus = ZwWriteFile(hFileHandle, NULL, NULL, NULL, &ioStatus, usFileValue.Buffer, usFileValue.Length, &offset, NULL);
+		if (!NT_SUCCESS(nStatus))
+		{
+			DbgPrint("[dbg]: Write is failed, PATH=%wZ\n", SouFileName);
+			break;
+		}
+		
+		// 如果不释放,将会独占,后面函数不能使用.原因 ?
+		if (hFileHandle)
+		{
+			ZwClose(hFileHandle);
+			hFileHandle = NULL;
+		}
+			
+		nStatus = CopyFile(&TarFileName, &SouFileName);
+		if (NT_SUCCESS(nStatus))
+			bStatus = TRUE;
+
+
+	} while (FALSE);
+	if(hFileHandle)
+		ZwClose(hFileHandle);
+	return bStatus;
+}
+
+NTSTATUS CopyFile(PUNICODE_STRING TargerPath, PUNICODE_STRING SourcePath)
+{
+	HANDLE TargerHandle = NULL;
+	HANDLE SourceHandle = NULL;
+	PVOID pBuffer = NULL;
+
+	ULONG BufferSize = 1024 * 4;
+	ULONG DataLength = 0;
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	LARGE_INTEGER offset = { 0 };
+	IO_STATUS_BLOCK ioStatus = { 0 };
+	OBJECT_ATTRIBUTES tarObjAttr = { 0 };
+	OBJECT_ATTRIBUTES souObjAttr = { 0 };
+
+	InitializeObjectAttributes(&tarObjAttr, TargerPath, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+	InitializeObjectAttributes(&souObjAttr, SourcePath, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+	do
+	{
+		// 打开源文件,目标文件,申请内存
+		nStatus = ZwCreateFile(&TargerHandle, GENERIC_ALL, &tarObjAttr, &ioStatus, 0, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ , FILE_OVERWRITE_IF, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_RANDOM_ACCESS, NULL, 0);
+		if (!NT_SUCCESS(nStatus) || !TargerHandle)
+		{
+			DbgPrint("[dbg]: COPY File -> Targer File Open Faild!  STATUS=%x \n", nStatus);
+			break;
+		}
+		nStatus = ZwCreateFile(&SourceHandle, GENERIC_ALL, &souObjAttr, &ioStatus, 0, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN_IF, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_RANDOM_ACCESS, NULL, 0);
+		if (!NT_SUCCESS(nStatus) || !SourceHandle)
+		{
+			DbgPrint("[dbg]: COPY File -> Source File Open Faild!  STATUS=%x \n", nStatus);
+			break;
+		}
+		pBuffer = ExAllocatePoolWithTag(PagedPool, BufferSize, 'BUFF');
+		if (!pBuffer)
+		{
+			DbgPrint("[dbg]: ExAllocatePool Faild!  STATUS=%x \n", nStatus);
+			break;
+		}
+
+		// 使用一个循环来读取文件和写入文件
+		while (TRUE)
+		{
+			// 读取文件
+			nStatus = ZwReadFile(SourceHandle, NULL, NULL, NULL, &ioStatus, pBuffer, BufferSize, &offset, NULL);
+			if (!NT_SUCCESS(nStatus))
+			{
+				if (STATUS_END_OF_FILE == nStatus)	// 如果状态为STATUS_END_OF_FILE说明文件已经读取完了
+					nStatus = TRUE;
+				break;
+			}
+			DataLength = (ULONG)ioStatus.Information;
+
+			//写入文件
+			nStatus = ZwWriteFile(TargerHandle, NULL, NULL, NULL, &ioStatus, pBuffer, DataLength, &offset, NULL);
+			if (!NT_SUCCESS(nStatus))
+				break;
+
+			//移动文件指针,直到读取时读到STATUS_END_OF_FILE
+			offset.QuadPart += BufferSize;
+		}
+	} while (0);
+
+	if (pBuffer)
+		ExFreePoolWithTag(pBuffer, 'BUFF');
+	if (SourceHandle)
+		ZwClose(SourceHandle);
+	if (TargerHandle)
+		ZwClose(TargerHandle);
+	return nStatus;
 }
 
