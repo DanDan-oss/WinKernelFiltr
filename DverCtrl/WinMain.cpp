@@ -6,6 +6,7 @@
 //#include <minwinbase.h>
 
 #define DriverPath TEXT("C:\\TEST\\FirstDirver.sys")		// 驱动路径
+#define SymbolicLinkName_DEMO	 TEXT("\\\\.\\slbkcdo_1187480520")
 #define SymbolicLinkName TEXT("\\\\.\\\\MyDev")		// 链接符号
 #define ServiceName TEXT("FirstDriver")				// 驱动服务名
 
@@ -25,7 +26,8 @@ void OpenSymb(HWND);							// 驱动设备符号链接按钮被点击
 HINSTANCE WinInstan = NULL;						// 进程句柄
 HWND OutEditHand = NULL;						// 消息日志框的句柄
 HICON g_hicon = NULL;							// 图标句柄
-HANDLE hdDirverSymb = NULL;						// 连接驱动设备的文件句柄
+
+DriverSymbolicLink* pDemoDevice = new DriverSymbolicLink;					// 驱动dmeo生成的设备控制
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevIntance, PCHAR szCmdLine, int iCmdShow)
 {
@@ -80,7 +82,7 @@ void DlogInit(HWND hWnd)
 	SetWindowTextW(hwDriverPath, cswDriverPath+"\\FirstDirver.sys");
 
 	DbgMessagOut((PWCHAR)TEXT("初始化驱动设备符号链接..."));
-	SetWindowTextW(hwSymbli, SymbolicLinkName);
+	SetWindowTextW(hwSymbli, SymbolicLinkName_DEMO);
 
 	DbgMessagOut((PWCHAR)TEXT("初始化驱动注册表名..."));
 	SetWindowTextW(hwServerName, ServiceName);
@@ -92,6 +94,8 @@ void DlogInit(HWND hWnd)
 
 void MenuOperation(HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
+
+	const wchar_t* str = L"Hello Kernel, my is 3333\0";
 	switch (LOWORD(wParam))
 	{
 	case IDC_BTN_OPENDIRFILE:
@@ -122,19 +126,23 @@ void MenuOperation(HWND hWnd, WPARAM wParam, LPARAM lParam)
 		return;
 
 	case IDC_BTN_CLOSESYMB:
-		if (!hdDirverSymb)
+		if (!pDemoDevice->GetSymbolicLinkHandle())
 		{
 			DbgMessagOut((PWCHAR)TEXT("未打开驱动符号链接"));
 			return;
 		}
+		pDemoDevice->CloseSymbolicLink();
 		DbgMessagOut((PWCHAR)TEXT("驱动链接关闭"));
-		CloseHandle(hdDirverSymb);
-		hdDirverSymb = NULL;
 		return;
 	case IDC_BUTTON6:
-		if(DeviceIoControl(hdDirverSymb, DevReadCtrl, NULL, 0, NULL, 0, NULL, NULL))
-			DbgMessagOut((PWCHAR)TEXT("控制码发生成功"));
+		
+		
+		if(pDemoDevice->SendStringToDevice(str, lstrlenW(str) * 2 + 1))
+			DbgMessagOut((PWCHAR)TEXT("控制码发送成功"));
+		else
+			DbgMessagOut((PWCHAR)TEXT("控制码发送失败"));
 		return;
+
 	default://
 		break;
 	}
@@ -236,6 +244,9 @@ void StopBtnDown(HWND hWnd)
 		return;
 	if (!GetWindowTextW(MenuHand, szDevName, 50))
 		return;
+	if (pDemoDevice->GetSymbolicLinkHandle())
+		pDemoDevice->CloseSymbolicLink();
+	
 	RegisterKey::DriverStop(szDevName);
 	RunDriver = FALSE;
 }
@@ -244,12 +255,9 @@ void OpenSymb(HWND hWnd)
 {
 	HWND menuHand = NULL;			// 保存符号链接名的窗口菜单句柄
 	WCHAR FileDevName[50] = { 0 };
-	if (!RunDriver)
-	{
-		DbgMessagOut((PWCHAR)TEXT("驱动设备尚未运行,无法打开服务号链接"));
-		return;
-	}
-	if (hdDirverSymb)
+	HANDLE hdSymb = NULL;
+
+	if (pDemoDevice->GetSymbolicLinkHandle())
 	{
 		DbgMessagOut((PWCHAR)TEXT("驱动设备链接已经打开,不用重复打开"));
 		return;
@@ -260,11 +268,15 @@ void OpenSymb(HWND hWnd)
 		return;
 		
 	GetWindowTextW(menuHand, FileDevName, 50);
-	hdDirverSymb = OpenDriverSymb(FileDevName);
-	if(hdDirverSymb)
+
+	hdSymb = pDemoDevice->OpenSymbolicLink(FileDevName);
+	if(hdSymb)
 		DbgMessagOut((PWCHAR)TEXT("打开驱动设备链接成功"));
+	else
+		DbgMessagOut((PWCHAR)TEXT("打开驱动设备链接失败"));
 	return;
 }
+
 void DbgMessagOut(WCHAR* pBuff)
 {
 	SYSTEMTIME Time = { 0 }; // 系统时间结构体

@@ -1,12 +1,17 @@
 #include <ntifs.h>
 #include <ntddk.h>
 #include <Ntstrsafe.h>
+#include <wdm.h>
+#include <wdmsec.h>
 #include "demo.h"
 
 // TARGETLIBS=$(DDK_LIB_PATH)\ntstrsafe.lib
 
+
+
 extern PDRIVER_OBJECT g_poDriverObject;
 extern PUNICODE_STRING g_psRegistryPath;
+extern PDEVICE_OBJECT g_demo_cdo = NULL;
 
 void DemoMain()
 {
@@ -18,6 +23,7 @@ void DemoMain()
 	RegistryKeyOperationSample();
 
 	FileOperationSample();
+	DeviceControlSample();
 
 	KdBreakPoint();
 }
@@ -503,7 +509,7 @@ BOOLEAN FileOperationSample()
 			break;
 		}
 		
-		// 如果不释放,将会独占,后面函数不能使用.原因 ?
+		// 如果不释放,将会独占,后面不能使用.原因 ?
 		if (hFileHandle)
 		{
 			ZwClose(hFileHandle);
@@ -591,4 +597,150 @@ NTSTATUS CopyFile(PUNICODE_STRING TargerPath, PUNICODE_STRING SourcePath)
 		ZwClose(TargerHandle);
 	return nStatus;
 }
+
+
+VOID ThreadCallback(PVOID Context)
+{
+	PKEVENT pKevnt = (PKEVENT)Context;
+	DbgPrint("[dbg]: Print In My Thread \n");
+	KeSetEvent(pKevnt, 0, TRUE);
+
+	PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
+BOOLEAN SyetemThreadSample()
+{
+	PUNICODE_STRING pStr = NULL;
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	HANDLE hThread = NULL;
+	KEVENT eEvent = { 0 };
+
+	pStr = ExAllocatePoolWithTag(PagedPool, sizeof(UNICODE_STRING), 'thr');
+	if (!pStr)
+	{
+		DbgPrint("[dbg]: Thread  ExAllocatePoolWithTag Faild! \n");
+		return FALSE;
+	}
+	RtlInitUnicodeString(pStr, L"Hello Thread");
+
+	// 事件初始化,设置为TRUE,执行到等待函数将会阻塞
+	KeInitializeEvent(&eEvent, SynchronizationEvent, TRUE);
+
+	// 创建线程
+	nStatus = PsCreateSystemThread(&hThread, 0, NULL, NULL, NULL, ThreadCallback, (PVOID)&eEvent);
+	if (!NT_SUCCESS(nStatus))
+	{
+		// error:
+		return FALSE;
+	}
+
+	// 时间初始化后就可以使用了,在一个函数中,可以等待某个事件, 如果这个事件没有被设置，
+	// 那么就会阻塞在这里继续等待
+	KeWaitForSingleObject(&eEvent, Executive, KernelMode, 0, 0);
+
+	DbgPrint("[dbg]: KEVENT set TRUE, Wait is exit! \n");
+
+	// 设置某个事件的阻塞取消 KeSetEvent(&eEvent, 0, FALSE);
+	if (NULL == hThread)
+		ZwClose(hThread);
+	return TRUE;
+}
+
+BOOLEAN DeviceControlSample()
+{
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	UNICODE_STRING cdo_name = RTL_CONSTANT_STRING(L"\\Device\\slbkcdo_1187480520");
+	UNICODE_STRING cod_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
+	PDEVICE_OBJECT pDeviceObject = NULL;
+	
+	//// 生成一个控制设备,射程符号链接
+	//UNICODE_STRING sddl = RTL_CONSTANT_STRING(L"D:P(A;;GAGGGWD)");
+	//GUID guid;
+	//CoCreateGuid(&guid);
+	//nStatus = IoCreateDeviceSecure(g_poDriverObject, 0, &cdo_name, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &sddl, (LPCGUID)SLBKGUID_CLASS_MYCDO, &g_cdo);
+	//if (!NT_SUCCESS(nStatus))
+	//{
+	//	return nStatus;
+	//}
+
+	nStatus = IoCreateDevice(g_poDriverObject, 0, &cdo_name, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &pDeviceObject);
+	if (!NT_SUCCESS(nStatus))
+	{
+		DbgPrint("[dbg]: Create Kennel Device faild! STATUS=%x \n", nStatus);
+		return FALSE;
+	}
+
+	// 在创建符号链接前,尝试先删除再创建新的符号链接
+	IoDeleteSymbolicLink(&cod_syb);
+	nStatus = IoCreateSymbolicLink(&cod_syb, &cdo_name);
+	if (!NT_SUCCESS(nStatus))
+	{
+		DbgPrint("[dbg]: Create Kennel SymbolicLink faild! STATUS=%x \n", nStatus);
+		IoDeleteDevice(pDeviceObject);
+		return FALSE;
+	}
+	DbgPrint("[dbg]: Create Kennel SymbolicLink Success! sybName=%wZ  Device=%wZ\n", &cod_syb, &cdo_name);
+	g_demo_cdo = pDeviceObject;
+	g_poDriverObject->MajorFunction[IRP_MJ_CREATE] = cwkDispatch;
+	g_poDriverObject->MajorFunction[IRP_MJ_CLOSE] = cwkDispatch;
+	g_poDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = cwkDispatch;
+	return TRUE;
+}
+
+NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+	PVOID pBuffer = NULL;
+	ULONG ulInLen = 0;
+	ULONG ulOutLen = 0;
+	ULONG ulControlCode = 0;
+	ULONG ulRetlen = 0;
+
+	do
+	{
+		// 判断请求是否给之前生成的控制设备,如果不是,直接不处理
+		if (DeviceObject != g_demo_cdo)
+		{
+			DbgPrint("[dbg]: Kennel Recv Device is no Demo\n");
+			nStatus = STATUS_INVALID_DEVICE_OBJECT_PARAMETER;
+			break;
+		}
+		// 判断请求种类是不是关闭和打开
+		if (irpsp->MajorFunction == IRP_MJ_CREATE || irpsp->MajorFunction == IRP_MJ_CLOSE)
+		{
+			DbgPrint("[dbg]: Kennel Device Demo  is Open or Close \n");
+			nStatus = STATUS_SUCCESS;
+			break;
+		}
+
+		if (irpsp->MajorFunction == IRP_MJ_DEVICE_CONTROL)
+		{
+			pBuffer = Irp->AssociatedIrp.SystemBuffer;
+			ulInLen = irpsp->Parameters.DeviceIoControl.InputBufferLength;
+			ulOutLen = irpsp->Parameters.DeviceIoControl.OutputBufferLength;
+			ulControlCode = irpsp->Parameters.DeviceIoControl.IoControlCode;
+			switch (ulControlCode)
+			{
+			case CWK_DVC_SEND_STR:
+				ASSERT(pBuffer != NULL);
+				ASSERT(ulInLen > 0 && ulInLen<254);
+				ASSERT(ulOutLen == 0);
+				DbgPrint("[dbg]: 3 huang Send string: %ws \n", (wchar_t*)pBuffer);
+				nStatus = STATUS_SUCCESS;
+				break;
+
+			case CWK_DVC_RECV_STR:
+			default:
+				nStatus = STATUS_INVALID_PARAMETER;
+				break;
+			}
+		}
+	} while (FALSE);
+	Irp->IoStatus.Information = ulRetlen;
+	Irp->IoStatus.Status = nStatus;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+	return nStatus;
+}
+
 
