@@ -4,6 +4,7 @@
 #include <ntddk.h>
 
 #define CWK_COD_SYB_NAME L"\\??\\slbkcdo_1187480520"
+#define CWK_COD_DEVICE_NAME L"\\Device\\slbkcdo_1187480520"
 
 #define CWK_DVC_SEND_STR (ULONG)CTL_CODE(FILE_DEVICE_UNKNOWN, 0x911, METHOD_BUFFERED, FILE_WRITE_DATA)
 #define CWK_DVC_RECV_STR (ULONG)CTL_CODE(FILE_DEVICE_UNKNOWN, 0x912, METHOD_BUFFERED, FILE_READ_DATA)
@@ -23,7 +24,7 @@ BOOLEAN FileOperationSample();		/* 文件操作*/
 BOOLEAN SyetemThreadSample();	/* 线程操作 */
 
 BOOLEAN DeviceControlSample();	/* 应用层和驱动层通信*/
-NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp);	// 请求分发函数
+NTSTATUS cwkDispatchDemo(PDEVICE_OBJECT DeviceObject, PIRP Irp);	// 请求分发函数
 
 
 

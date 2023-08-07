@@ -4,31 +4,12 @@
 
 extern PDRIVER_OBJECT g_poDriverObject = NULL;
 extern PUNICODE_STRING g_psRegistryPath = NULL;
-extern PDEVICE_OBJECT g_demo_cdo;
+extern PDEVICE_OBJECT g_demo_cdo;					// demo设备对象
 
-VOID DriverUnload(PDRIVER_OBJECT DriverObject)
-{
-	UNICODE_STRING cdo_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
-	if (g_poDriverObject)
-		DbgPrint("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId());
-	if (g_psRegistryPath->Buffer && g_psRegistryPath)
-	{
 
-		DbgPrint("[dbg:%ws]Driver Unload, Driver RegistryPath:%wZ\n", __FUNCTIONW__, g_psRegistryPath);
+VOID DriverUnload(PDRIVER_OBJECT DriverObject);					// 驱动卸载回调函数
+NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp);	// IRP请求分发函数
 
-		ExFreePoolWithTag(g_psRegistryPath->Buffer, 'Path');
-		g_psRegistryPath = NULL;
-	}
-	if (g_demo_cdo)
-	{
-		DbgPrint("[dbg:%ws]Driver Unload, Delete Device \n", __FUNCTIONW__);
-		ASSERT(g_demo_cdo != NULL);
-		IoDeleteSymbolicLink(&cdo_syb);
-		IoDeleteDevice(g_demo_cdo);
-	}
-		
-	return;
-}
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -56,9 +37,54 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 		g_poDriverObject = DriverObject;
 		DriverObject->DriverUnload = DriverUnload;
 		DbgPrint("[dbg:%ws]Driver Object Address:%p, Current IRQL=0x%u\n", __FUNCTIONW__, DriverObject, KeGetCurrentIrql());
+		for (int i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i)
+			DriverObject->MajorFunction[i] = cwkDispatch;
 	}
+
+	
 
 
 	DemoMain();
 	return STATUS_SUCCESS;
+}
+
+
+VOID DriverUnload(PDRIVER_OBJECT DriverObject)
+{
+	UNICODE_STRING cdo_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
+	if (g_poDriverObject)
+		DbgPrint("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId());
+	if (g_psRegistryPath->Buffer && g_psRegistryPath)
+	{
+
+		DbgPrint("[dbg:%ws]Driver Unload, Driver RegistryPath:%wZ\n", __FUNCTIONW__, g_psRegistryPath);
+
+		ExFreePoolWithTag(g_psRegistryPath->Buffer, 'Path');
+		g_psRegistryPath = NULL;
+	}
+	if (g_demo_cdo)
+	{
+		DbgPrint("[dbg:%ws]Driver Unload, Delete Device \n", __FUNCTIONW__);
+		ASSERT(g_demo_cdo != NULL);
+		IoDeleteSymbolicLink(&cdo_syb);
+		IoDeleteDevice(g_demo_cdo);
+	}
+
+	return;
+}
+
+
+NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	PIO_STACK_LOCATION irpsp = NULL;
+	NTSTATUS nStatus = STATUS_INVALID_DEVICE_OBJECT_PARAMETER;
+
+	if (DeviceObject == g_demo_cdo)
+		return cwkDispatchDemo(DeviceObject, Irp);
+
+	irpsp = IoGetCurrentIrpStackLocation(Irp);
+	Irp->IoStatus.Information = 0;
+	Irp->IoStatus.Status = nStatus;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+	return nStatus;
 }

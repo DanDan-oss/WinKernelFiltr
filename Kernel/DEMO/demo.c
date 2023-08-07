@@ -7,11 +7,9 @@
 
 // TARGETLIBS=$(DDK_LIB_PATH)\ntstrsafe.lib
 
-
-
-extern PDRIVER_OBJECT g_poDriverObject;
-extern PUNICODE_STRING g_psRegistryPath;
-extern PDEVICE_OBJECT g_demo_cdo = NULL;
+extern PDRIVER_OBJECT g_poDriverObject;			// 驱动对象
+extern PUNICODE_STRING g_psRegistryPath;		// 驱动注册路径
+extern PDEVICE_OBJECT g_demo_cdo = NULL;		// 生成的设备对象
 
 void DemoMain()
 {
@@ -32,34 +30,6 @@ void DemoMain()
 /*	UNICODE_STRING 操作*/
 void StringOperationSample(void)
 {
-	/*
-	typedef struct _UNICODE_STRING {
-		USHORT Length;   //有效字符串的长度（字节数）
-		USHORT MaximumLength; //字符串的最大长度（字节数）
-		PWSTR Buffer; //指向字符串的指针
-	}UNICODE_STRING,*PUNICODE_STRING;
-	
-	typedef STRING
-	{
-		USHORT Length;   //有效字符串的长度（字节数）
-		USHORT MaximumLength; //字符串的最大长度（字节数）
-		PSTR Buffer; //指向字符串的指针
-	}ANSI_STRING
-
-	
-	VOID RtlInitUnicodeString(PUNICODE_STRING DestinationString, PCWSTR SourceString);	// 初始化字符串结构,并没有为DestinationString.Buffer分配内存,会直接常量	
-	VOID RtlInitEmptyUnicodeString(PUNICODE_STRING UnicodeString, PWCHAR Buffer, USHORT BufferSize);	//// 初始化一个空的UnicodeString,将他指向Buffer
-
-	VOID RtlUnicodeStringCopyString(PUNICODE_STRING DestinationString, NTSTRSAFE pszSrc);		// 拷贝
-	NTSTATUS RtlAppendUnicodeToString(PUNICODE_STRING DestinationString, PCWSTR SourceString);	// 将UNICODE_STRING字符串追加拷贝到Buffer,Buffer不能指向NULL
-
-	RtlCompareString(const PANSI_STRING String1, const  PANSI_STRING String2, BOOLEAN CaseInSensitive);			// ANSI_STRING 字符串比较
-	RtlCompareUnicodeString(PUNICODE_STRING String1,PUNICODE_STRING String2, BOOLEAN CaseInsensitive);			// UNICODE_STRING字符串比较
-
-	NTSTRSAFEDDI RtlStringCchPrintfA(NTSTRSAFE_PSTR pszDest, cchDest, NTSTRSAFE_PCSTR pszFormat, ...);			// 格式化字符串类似于 :sprintf()
-
-	*/
-	
 	// 字符串初始化
 	UNICODE_STRING uFirstString1 = { 0 };
 	RtlInitUnicodeString(&uFirstString1, L"Hello Kernel String struct UNICODE_STRING\n");	// 并没有为uFirstString1.Buffer分配字符串,直接让他指向常量
@@ -87,27 +57,6 @@ void StringOperationSample(void)
 /* LIST_ENTRY 链表结构操作 */
 void ListOperationSample(void)
 {
-	
-	/*
-	typedef struct _LIST_ENTRY
-	{
-		struct _LIST_ENTRY* Flink;	// 指向后一个节点
-		struct _LIST_ENTRY* Blink;	// 指向前一个节点
-	}LIST_ENTRY, *PLIST_ENTRY;
-
-	CONTAINING_RECORD(Address, type, Field);	// 宏函数,由于 Entry->Flink并不是直接指向下一个节点的结构起始位置,而是LIST_ENTRY的位置,需要使用宏函数转换
-	BOOLEAN IsListEmpty(const PLIST_ENTRY ListHead);		// 判断是不是空链表,TRUE表示空链表,FALSE表示链表非空
-	VOID InitializeListHead(_Out_ PLIST_ENTRY ListHand);	// 初始化头节点, 原型 ListHeader->Flink = ListHeader->Blink = PListHeader;
-
-	VOID InsertHeadList(PLIST_ENTRY ListHand, PLIST_ENTRY Entry);	// 头插法,头节点的后一个节点
-	VOID InsertTailList(PLIST_ENTRY ListHand, PLIST_ENTRY Entry);	// 尾插法
-
-	PLIST_ENTRY RemoveHeadList(PLIST_ENTRY ListHand);				// 移除头指针指向的第一个元素,移除成功返回移除的节点的指针,移除失败返回NULL
-	PLIST_ENTRY RemoveTailList(PLIST_ENTRY ListHand);				// 移除最后一个元素,移除成功返回移除的节点的指针,移除失败返回NULL
-	BOOLEAN RemoveEntryList(PLIST_ENTRY Entry);						// 移除某个特定的节点
-	*/
-
-
 	// 使用自定义节点结构嵌入系统LIST_ENTRY
 	typedef struct _TestListEntery
 	{
@@ -157,29 +106,6 @@ void ListOperationSample(void)
 
 void SpinLockOperationSample(void)
 {
-	/* 
-	typedef ULONG_PTR KSPIN_LOCK;		// 自旋锁类型, 本质指针类型
-	
-	void KeInitializeSpinLock(PKSPIN_LOCK SpinLock);		// 初始化自旋锁
-	void KeAcquireSpinLock(SpinLock,OldIrql);				// 宏函数,通过引发IRQL使自旋锁上锁
-		// 注意KSPIN_LOCK变量不能写成局部变量,因为这样每个线程都会有一个自己的KSPIN_LOCK，这个就会变的没有意义,应该写成全局使大家共用这个函数
-
-	VOID KeReleaseSpinLock (PKSPIN_LOCK SpinLock, KIRQL NewIrql);	// 释放自旋锁,还原正在运行的原始IRQL
-
-	PLIST_ENTRY ExInterlockedInsertHeadList(PLIST_ENTRY ListHead, PLIST_ENTRY ListEntry,PKSPIN_LOCK Lock);		// 使用自旋锁的方式往链表中添加节点,返回插入成功节点的指针
-	PLIST_ENTRY ExInterlockedRemoveHeadList(PLIST_ENTRY ListHead, PKSPIN_LOCK Lock);	// 用自旋锁的方式移除链表中第一个节点,成功将返回移除的节点指针返回
-
-	// 队列自旋锁
-	typedef struct _KLOCK_QUEUE_HANDLE {
-	KSPIN_LOCK_QUEUE LockQueue;
-	KIRQL OldIrql;
-	} KLOCK_QUEUE_HANDLE, *PKLOCK_QUEUE_HANDLE;
-
-	void KeAcquireInStackQueuedSpinLock(PKSPIN_LOCK SpinLock, PKLOCK_QUEUE_HANDLE LockHandle.);	// 获取队列自旋锁
-	void KeReleaseInStackQueuedSpinLock(PKLOCK_QUEUE_HANDLE LockHandle);	// 释放由KeAcquireInStackQueuedSpinLock获取的队列自旋锁
-	
-	*/
-
 	// TODO: 自旋锁配合链表使用
 	typedef struct _FILE_INFO
 	{
@@ -224,26 +150,6 @@ void SpinLockOperationSample(void)
 
 void MemoryOperationSample(void)
 {
-	/*
-	typedef enum _POOL_TYPE
-	{
-		NonPagedPool,
-		NonPagedPoolExecute,
-		PagedPool, 
-		NonPagedPoolNx,
-		...
-	}POOL_TYPE;
-
-
-	PVOID ExAllocatePoolWithTag(POOL_TYPE PoolType, SIZE_T NumberOfButes, ULONG Tag);	//分配指定类型的池内存，并返回指向已分配块的指针
-
-	PVOID (*PALLOCATE_FUNCTION)(POLL_TYPE PoolType, SIZE_T NumberOfBytes, ULONG Tag);	// 旁视列表申请内存回调函数原型
-	VOID (*PFREE_FUNCTION)(PVOID Buffer);					// 旁视列表释放内存回调函数原型
-	void ExInitializeNPagedLookasideListP(PNPAGED_LOOKASIDE_LIST Lookaside, PALLOCATE_FUNCTION Allocate, PFREE_FUNCTION Free, ULONG Flags, SIZE_T Size, ULONG Tag, USHORT Depth);	// 初始化旁视列表内存管理对象,Allocate和Free设置为NULL时,操作系统会使用默认的
-
-	NTSTATUS ExInitializeLookasideListEx(PLOOKASIDE_LIST_EX lookaside, PALLOCATE_FUNCTION Allocate, PFREE_FUNCTION_EX Free, POOL_TYPE PoolType, ULONG Flags, SIZE_T Size, ULONG Tag, USHORT Depath); 
-	*/
-
 	PNPAGED_LOOKASIDE_LIST pLookAsideList = NULL;
 	BOOLEAN bSucc = FALSE;
 	BOOLEAN bInit = FALSE;
@@ -649,7 +555,7 @@ BOOLEAN SyetemThreadSample()
 BOOLEAN DeviceControlSample()
 {
 	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
-	UNICODE_STRING cdo_name = RTL_CONSTANT_STRING(L"\\Device\\slbkcdo_1187480520");
+	UNICODE_STRING cdo_name = RTL_CONSTANT_STRING(CWK_COD_DEVICE_NAME);
 	UNICODE_STRING cod_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
 	PDEVICE_OBJECT pDeviceObject = NULL;
 	
@@ -681,13 +587,10 @@ BOOLEAN DeviceControlSample()
 	}
 	DbgPrint("[dbg]: Create Kennel SymbolicLink Success! sybName=%wZ  Device=%wZ\n", &cod_syb, &cdo_name);
 	g_demo_cdo = pDeviceObject;
-	g_poDriverObject->MajorFunction[IRP_MJ_CREATE] = cwkDispatch;
-	g_poDriverObject->MajorFunction[IRP_MJ_CLOSE] = cwkDispatch;
-	g_poDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = cwkDispatch;
 	return TRUE;
 }
 
-NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+NTSTATUS cwkDispatchDemo(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
 	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
 	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
