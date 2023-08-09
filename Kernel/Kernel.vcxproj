@@ -152,9 +152,11 @@
   <ItemGroup>
     <ClCompile Include="DEMO\demo.c" />
     <ClCompile Include="Driver.c" />
+    <ClCompile Include="Filter\SerialPort.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DEMO\demo.h" />
+    <ClInclude Include="Filter\SerialPort.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

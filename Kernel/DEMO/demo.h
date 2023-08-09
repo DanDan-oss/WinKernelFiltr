@@ -26,6 +26,9 @@ BOOLEAN SyetemThreadSample();	/* 线程操作 */
 BOOLEAN DeviceControlSample();	/* 应用层和驱动层通信*/
 NTSTATUS cwkDispatchDemo(PDEVICE_OBJECT DeviceObject, PIRP Irp);	// 请求分发函数
 
+// 卸载清理函数,清理demo中创建的设备,符号等
+VOID ccpUnloadDemo();
+
 
 
 #endif // !_DEMO_H

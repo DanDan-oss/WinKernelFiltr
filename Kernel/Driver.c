@@ -1,6 +1,7 @@
 #include <ntddk.h>
 #include <Ntstrsafe.h>
 #include "DEMO/demo.h"
+#include "Filter/SerialPort.h"
 
 extern PDRIVER_OBJECT g_poDriverObject = NULL;
 extern PUNICODE_STRING g_psRegistryPath = NULL;
@@ -41,17 +42,14 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 			DriverObject->MajorFunction[i] = cwkDispatch;
 	}
 
-	
-
-
-	DemoMain();
+	//DemoMain();
+	SerialPortMain(DriverObject);		// ´®¿Ú¹ýÂË
 	return STATUS_SUCCESS;
 }
 
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 {
-	UNICODE_STRING cdo_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
 	if (g_poDriverObject)
 		DbgPrint("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId());
 	if (g_psRegistryPath->Buffer && g_psRegistryPath)
@@ -63,12 +61,9 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 		g_psRegistryPath = NULL;
 	}
 	if (g_demo_cdo)
-	{
-		DbgPrint("[dbg:%ws]Driver Unload, Delete Device \n", __FUNCTIONW__);
-		ASSERT(g_demo_cdo != NULL);
-		IoDeleteSymbolicLink(&cdo_syb);
-		IoDeleteDevice(g_demo_cdo);
-	}
+		ccpUnloadDemo();
+
+
 
 	return;
 }
@@ -79,8 +74,13 @@ NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	PIO_STACK_LOCATION irpsp = NULL;
 	NTSTATUS nStatus = STATUS_INVALID_DEVICE_OBJECT_PARAMETER;
 
-	if (DeviceObject == g_demo_cdo)
+	if (DeviceObject == g_demo_cdo && DeviceObject != NULL)
 		return cwkDispatchDemo(DeviceObject, Irp);
+
+	nStatus = ccpDispatchCom(DeviceObject, Irp);
+	if (nStatus != STATUS_INVALID_DEVICE_OBJECT_PARAMETER)
+		return nStatus;
+
 
 	irpsp = IoGetCurrentIrpStackLocation(Irp);
 	Irp->IoStatus.Information = 0;

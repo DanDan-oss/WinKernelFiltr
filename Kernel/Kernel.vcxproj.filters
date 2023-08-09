@@ -27,10 +27,16 @@
     <ClCompile Include="DEMO\demo.c">
       <Filter>Demo</Filter>
     </ClCompile>
+    <ClCompile Include="Filter\SerialPort.c">
+      <Filter>Filter</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DEMO\demo.h">
       <Filter>Demo</Filter>
+    </ClInclude>
+    <ClInclude Include="Filter\SerialPort.h">
+      <Filter>Filter</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
