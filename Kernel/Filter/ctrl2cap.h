@@ -8,6 +8,7 @@
 #define USBKBD_DRIVER_NAME L"\\Driver\\Kbdhid"            // USB键盘 端口驱动
 #define PS2KBD_DRIVER_NAME L"\\Driver\\i8042prt"        // PS/2键盘 端口驱动
 
+
 /* 自定义设备扩展*/
 typedef struct _C2P_DEV_EXT
 {
@@ -25,15 +26,29 @@ typedef struct _C2P_DEV_EXT
 NTSTATUS ObReferenceObjectByName(PUNICODE_STRING ObjectName, ULONG Attribuites, PACCESS_STATE AccessState, ACCESS_MASK DesiredAccess, 
 	POBJECT_TYPE ObjectType, KPROCESSOR_MODE AccessMode, PVOID ParseContext, PVOID* Object);
 
-/* 入口函数 */
-NTSTATUS Ctrl2CaoMain(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 
+/* 入口函数 */
+NTSTATUS Ctrl2CapMain(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
+NTSTATUS Ctrl2CapUnload(PDRIVER_OBJECT DriverObject);
+
+// IRP分发函数
+NTSTATUS Ctrl2CapDispatchGeneral(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+// 电源管理IRP
+NTSTATUS Ctrl2CapDispatchPower(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+// 设备PNP操作
+NTSTATUS Ctrl2CapDispatchPnP(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+// 设备读取操作
+NTSTATUS Ctrl2CapDispatchRead(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+
+// 读操作IRP完成回调函数
+NTSTATUS Ctrl2CapReadComplete(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
 
 /* 打开驱动对象 KbdClass 绑定它下面所有的设备*/
-NTSTATUS c2pAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
-
+NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 // 初始化过滤设备 设备扩展信息
-NTSTATUS c2pFilterDevExtInit(PC2P_DEV_EXT devExt, PDEVICE_OBJECT pFileteDeviceObject, PDEVICE_OBJECT pTargetDeviceObject, PDEVICE_OBJECT pLowerDeviceObject);
+NTSTATUS Ctrl2CapFilterDevExtInit(PC2P_DEV_EXT devExt, PDEVICE_OBJECT pFileteDeviceObject, PDEVICE_OBJECT pTargetDeviceObject, PDEVICE_OBJECT pLowerDeviceObject);
+
+NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject);
 
 
 #endif // !_CTRL2CAP_H

@@ -35,9 +35,4 @@
       <Filter>资源文件</Filter>
     </ResourceCompile>
   </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="Win64.asm">
-      <Filter>头文件</Filter>
-    </CustomBuild>
-  </ItemGroup>
 </Project>

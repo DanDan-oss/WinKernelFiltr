@@ -43,10 +43,10 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 			DriverObject->MajorFunction[i] = cwkDispatch;
 	}
 
-	//DemoMain();
+	// DemoMain();
+	// SerialPortMain(DriverObject);		// 串口过滤
 
-	//SerialPortMain(DriverObject);		// 串口过滤
-	Ctrl2CaoMain(DriverObject, RegistryPath);		// 键盘过滤
+	// Ctrl2CaoMain(DriverObject, RegistryPath);		// 键盘过滤
 
 	return STATUS_SUCCESS;
 }
@@ -84,6 +84,10 @@ NTSTATUS cwkDispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	if (nStatus != STATUS_INVALID_DEVICE_OBJECT_PARAMETER)
 		return nStatus;
 
+	// TODO: 键盘的IRP分发函数由于没有去遍历过滤设备判断,只是简单判断扩展结构大小,可能兼容很差
+	nStatus = Ctrl2CapDispatchGeneral(DeviceObject, Irp);
+	if (nStatus != STATUS_INVALID_DEVICE_OBJECT_PARAMETER)
+		return nStatus;
 
 	irpsp = IoGetCurrentIrpStackLocation(Irp);
 	Irp->IoStatus.Information = 0;
