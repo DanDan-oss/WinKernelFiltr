@@ -2,6 +2,7 @@
 #include <Ntstrsafe.h>
 #include "DEMO/demo.h"
 #include "Filter/SerialPort.h"
+#include "Filter/ctrl2cap.h"
 
 extern PDRIVER_OBJECT g_poDriverObject = NULL;
 extern PUNICODE_STRING g_psRegistryPath = NULL;
@@ -43,7 +44,10 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 	}
 
 	//DemoMain();
-	SerialPortMain(DriverObject);		// 串口过滤
+
+	//SerialPortMain(DriverObject);		// 串口过滤
+	Ctrl2CaoMain(DriverObject, RegistryPath);		// 键盘过滤
+
 	return STATUS_SUCCESS;
 }
 
@@ -62,7 +66,6 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 	}
 	if (g_demo_cdo)
 		ccpUnloadDemo();
-
 
 
 	return;

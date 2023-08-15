@@ -71,7 +71,7 @@ PDEVICE_OBJECT ccpOpenCom(ULONG ID, NTSTATUS* Status)
 	*Status = IoGetDeviceObjectPointer(&nameStr, FILE_ALL_ACCESS, &fileObject, &devObject);
 	if (!NT_SUCCESS(*Status))
 	{
-		DbgPrint("[dbg]: open Serial Port Device failed: %wZ \n", nameStr);
+		KdPrint(("[dbg]: open Serial Port Device failed: %wZ \n", nameStr));
 		return NULL;
 	}
 		
@@ -89,7 +89,7 @@ NTSTATUS ccpAttachDevice(PDRIVER_OBJECT DriverObject, PDEVICE_OBJECT OldDeviceOb
 	PDEVICE_OBJECT topDev = NULL;
 
 	// 生成设备
-	nStatus = IoCreateDevice(DriverObject, 0, NULL, OldDeviceObject->DeviceType, 0, FALSE, FiltDeviceObject);
+	nStatus = IoCreateDevice(DriverObject, 0, NULL, OldDeviceObject->DeviceType, 0, FALSE, OUT FiltDeviceObject);
 	if (!NT_SUCCESS(nStatus))
 		return nStatus;
 
@@ -150,7 +150,7 @@ NTSTATUS ccpDispatchCom(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 				// 打印内容
 				if(pBuffer)
 					for (UINT32 j = 0; j < bufferLen; ++j)
-						DbgPrint("[dbg]: comcap: Send Data: %2x \n", ((PUCHAR)pBuffer)[j]);
+						KdPrint(("[dbg]: comcap: Send Data: %2x \n", ((PUCHAR)pBuffer)[j]));
 			}
 
 			// 将请求直接下发
