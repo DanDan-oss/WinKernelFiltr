@@ -21,6 +21,15 @@ typedef struct _C2P_DEV_EXT
 	// TargetDeviceObject与TargetDeviceObject是同一个指针,一个是通过获取驱动对象时,指向驱动的设备得到的,一个是绑定设备时获取的
 }C2P_DEV_EXT, * PC2P_DEV_EXT;
 
+typedef struct _KEYBOARD_INPUT_DATA
+{
+    USHORT UnitId;    // 对于\\DEVICE\\KeyboardPort0这个值是0,\\DEVICE\\KeyboardPort1这个值是1,依此类推
+    USHORT MakeCode;    // 扫描码
+    USHORT Flags;        // 标志,标志一个键按下还是弹起
+    USHORT Reserved;        // 保留
+    ULONG ExtraInformation; // 扩展信息
+}KEYBOARD_INPUT_DATA, * PKEYBOARD_INPUT_DATA;
+
 // 通过一个名字来获得一个对象得指针(闭源函数,文档没有公开,声明直接使用了)
 // 调用ObReferenceObjectByName获得对象引用会使驱动对象的引用计数增加,ObDereferenceObject释放驱动对象引用
 NTSTATUS ObReferenceObjectByName(PUNICODE_STRING ObjectName, ULONG Attribuites, PACCESS_STATE AccessState, ACCESS_MASK DesiredAccess, 
@@ -49,6 +58,9 @@ NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Regi
 NTSTATUS Ctrl2CapFilterDevExtInit(PC2P_DEV_EXT devExt, PDEVICE_OBJECT pFileteDeviceObject, PDEVICE_OBJECT pTargetDeviceObject, PDEVICE_OBJECT pLowerDeviceObject);
 
 NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject);
+
+/* 解析键盘操作码 */
+NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp);
 
 
 #endif // !_CTRL2CAP_H

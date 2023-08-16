@@ -10,6 +10,28 @@
 extern POBJECT_TYPE IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用*/
 ULONG gC2pKeyCount = 0;
 
+enum KeyBoardCode
+{
+	KBC_CAPS_LOCK = 0x3A,
+	KBC_LCONTROL = 0x1D,
+	KBC_P = 0x70,
+	KBC_W = 0x77,
+	KBC_w = 0x11,
+	KBC_E = 0x65,
+	KBC_e = 0x12
+};
+
+//  自定义键盘扫描码的ASCII字符数组
+//  主键键盘数字1-10 字母小写字符(qwertyuiop)
+char UnShift[] = {
+    0, 0, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x2d, 0x3d, 0, 0,
+    0x71, 0x77, 0x65, 0x72, 0x74, 0x79, 0x75, 0x6C, 0x6F, 0x70 };
+
+//  上键盘符号 字母大写(QWERTYUIOP)
+char IsShfit[] = {
+    0,0,0x21,0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29, 0x5f, 0x2b, 0, 0,
+    0x51, 0x57, 0x45, 0x52, 0x54, 0x59, 0x55, 0x49, 0x4f, 0x50 };
+
 NTSTATUS Ctrl2CapMain(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
 	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
@@ -26,14 +48,14 @@ NTSTATUS Ctrl2CapUnload(PDRIVER_OBJECT DriverObject)
 	LARGE_INTEGER Interval = { 0 };
 	PRKTHREAD CurrentThread = NULL;
 
-	//TODO: 获取当前线程句柄并设置线程优先级为实时优先级
+	// 获取当前线程句柄并设置线程优先级为实时优先级
 	CurrentThread = KeGetCurrentThread();
 	KeSetPriorityThread(CurrentThread, LOW_REALTIME_PRIORITY);
 
 	UNREFERENCED_PARAMETER(DriverObject);
 	KdPrint(("DriverEntry Ctrl2cap unLoading...\n"));
 
-	//TODO:    循环遍历本驱动设备栈所有设备,解除过滤设备绑定并删除
+	// 循环遍历本驱动设备栈所有设备,解除过滤设备绑定并删除
 	DeviceObject = DriverObject->DeviceObject;
 	while (DeviceObject)
 	{
@@ -95,7 +117,7 @@ NTSTATUS Ctrl2CapDispatchPnP(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
 
 
-	// TODO; 请求直接下发, 然后判断是否是硬件拔出,如果是硬件拔出解除设备绑定,删除生成的过滤设备, 
+	// 请求直接下发, 然后判断是否是硬件拔出,如果是硬件拔出解除设备绑定,删除生成的过滤设备, 
 	IoSkipCurrentIrpStackLocation(Irp);
 	nStatus = IoCallDriver(devExt->LowerDeviceObject, Irp);
 
@@ -118,7 +140,7 @@ NTSTATUS Ctrl2CapDispatchRead(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	PIO_STACK_LOCATION irpsp = NULL;
 
 
-	//TODO: 判断当前IRP是否在IRP栈最底端,如果是 这是错误的请求,结束IRP传递, 返回IRP
+	//判断当前IRP是否在IRP栈最底端,如果是 这是错误的请求,结束IRP传递, 返回IRP
 	if (1 == Irp->CurrentLocation)
 	{
 		KdPrint(("[dbg]: Ctrl2CapDispatchRead encountered bogus current localtion\n"));
@@ -129,7 +151,7 @@ NTSTATUS Ctrl2CapDispatchRead(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 		IoCompleteRequest(Irp, IO_NO_INCREMENT);
 		return nStatus;
 	}
-	//TODO: 不在IRP栈最底端,IRP计数器加1
+	//不在IRP栈最底端,IRP计数器加1
 	++gC2pKeyCount;
 
 	//TODO: 获取被过滤设备指针
@@ -148,20 +170,14 @@ NTSTATUS Ctrl2CapReadComplete(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Conte
 {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	UNREFERENCED_PARAMETER(Context);
-	ULONGLONG ulBuflen = 0;
-	PUCHAR pBuffer = NULL;
 
-	//TODO:    IRP计数器减1,
+	// IRP计数器减1,
 	--gC2pKeyCount;
 
-	//TODO: 判断当前IRP请求是否执行成功,如果执行成功读取设备流过数据,否则数据没有意义
+	//判断当前IRP请求是否执行成功,如果执行成功读取设备流过数据,否则数据没有意义
 	if (NT_SUCCESS(Irp->IoStatus.Status))
 	{
-		ulBuflen = Irp->IoStatus.Information;
-		pBuffer = Irp->AssociatedIrp.SystemBuffer;
-
-		for (int i = 0; i < ulBuflen; ++i)
-			DbgPrint("ctrl2cap read: %2x\r\n", pBuffer[i]);
+		Ctrl2CapDataAnalysis(Irp);
 	}
 
 	// 判断IRP的调度标识是否时是挂起状态, 如果否,手动设置IRP调度挂起状态
@@ -184,10 +200,9 @@ NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Regi
 	PDEVICE_OBJECT pTargetDeviceObject = NULL;	// 绑定成功后的真实设备对象指针,函数返回赋值为0表示绑定失败
 	PDEVICE_OBJECT pLowerDeviceObject = NULL;	// 键盘驱动设备栈的设备对象
 
-	//TODO: 通过名字获取驱动对象指针, 获取完毕释放对象,保存指针
+	// 通过名字获取驱动对象指针, 获取完毕释放对象,保存指针
 	RtlInitUnicodeString(&strNtNameString, KBD_DRIVER_NAME);
 	nStatus = ObReferenceObjectByName(&strNtNameString, OBJ_CASE_INSENSITIVE, NULL, 0, IoDriverObjectType, KernelMode, NULL, &KbdDriverObject);
-
 	if (!NT_SUCCESS(nStatus))
 	{
 		KdPrint(("[dbg]: Couldn't get the  KbdDriver Object failed! DrverName=[%wZ]", strNtNameString));
@@ -257,22 +272,47 @@ NTSTATUS Ctrl2CapFilterDevExtInit(PC2P_DEV_EXT devExt, PDEVICE_OBJECT pFileteDev
 
 NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject)
 {
-    PC2P_DEV_EXT devExt = NULL;
-    //TODO: 获取设备对象的扩展
+    PC2P_DEV_EXT devExt = DeviceObject->DeviceExtension;
 
-     devExt = DeviceObject->DeviceExtension;
 	 if (!devExt->FilterDeviceObject || DeviceObject != devExt->FilterDeviceObject)
 	 {
 		 KdPrint(("[dbg]: Couldn't Detach to  Filter Device Object failed. %p", devExt->FilterDeviceObject));
 		 return STATUS_DEVICE_ENUMERATION_ERROR;
 	 }
          
-
-     //TODO: 解除设备扩展里面绑定的设备对象的绑定
+     //解除设备扩展里面绑定的设备对象的绑定
     IoDetachDevice(devExt->TargetDeviceObject);
     devExt->FilterDeviceObject = NULL;
     devExt->TargetDeviceObject = NULL;
     devExt->LowerDeviceObject = NULL;
     IoDeleteDevice(DeviceObject);
     return STATUS_SUCCESS;
+}
+
+NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp)
+{
+	PKEYBOARD_INPUT_DATA pKeyData = NULL;
+	LONGLONG bufLen = 0;	 /* 数据长度*/
+	ULONGLONG KeyBoardNum = 0;            // KEYBOARD_INPUT_DATA结构个数
+
+	pKeyData = Irp->AssociatedIrp.SystemBuffer;
+	bufLen = Irp->IoStatus.Information;
+	KeyBoardNum = bufLen / sizeof(KEYBOARD_INPUT_DATA);
+
+	for (int i = 0; i < KeyBoardNum; ++i)
+	{
+		KdPrint(("[dbg]:Ctrl2CapDataAnalysis numKeys:%d\n", KeyBoardNum));
+		KdPrint(("[dbg]:Ctrl2CapDataAnalysis scanCode:%x\n", pKeyData->MakeCode));
+		KdPrint(("[dbg]:Ctrl2CapDataAnalysis %s\n", pKeyData->Flags ? "Up" : "Down"));
+
+
+		// 测试拦截: 将Caps Lock键换成Ctrl键. W键换成E键
+		if (pKeyData->MakeCode == KBC_CAPS_LOCK)
+			pKeyData->MakeCode = KBC_LCONTROL;
+		if (pKeyData->MakeCode == KBC_W)
+			pKeyData->MakeCode = KBC_E;
+
+	}
+
+	return STATUS_SUCCESS;
 }
