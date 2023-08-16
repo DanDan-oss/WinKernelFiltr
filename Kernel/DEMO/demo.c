@@ -627,7 +627,7 @@ NTSTATUS cwkDispatchDemo(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 			{
 			case CWK_DVC_SEND_STR:
 				ASSERT(pBuffer != NULL);
-				ASSERT(ulInLen > 0 && ulInLen<254);
+				ASSERT(ulInLen > 0 && ulInLen<254);		// 限定缓冲区长度
 				ASSERT(ulOutLen == 0);
 				DbgPrint("[dbg]: 3 huang Send string: %ws \n", (wchar_t*)pBuffer);
 				nStatus = STATUS_SUCCESS;
@@ -646,4 +646,15 @@ NTSTATUS cwkDispatchDemo(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	return nStatus;
 }
 
+VOID ccpUnloadDemo()
+{
+	UNICODE_STRING cdo_syb = RTL_CONSTANT_STRING(CWK_COD_SYB_NAME);
+	if (g_demo_cdo)
+	{
+		DbgPrint("[dbg:%ws]Driver Unload, Delete  Demo Device \n", __FUNCTIONW__);
+		ASSERT(g_demo_cdo != NULL);
+		IoDeleteSymbolicLink(&cdo_syb);
+		IoDeleteDevice(g_demo_cdo);
+	}
 
+}

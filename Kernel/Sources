@@ -1,0 +1,5 @@
+TARGETNAME=FirstDriver
+TARGETTYPE=DRIVER
+INCLUDES= DEMO 
+SOURCES= Driver.c DEMO/demo.c \
+		Filter/SerialPort.c 
