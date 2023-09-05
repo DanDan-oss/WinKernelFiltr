@@ -46,7 +46,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 	// DemoMain();
 	// SerialPortMain(DriverObject);		// ´®¿Ú¹ýÂË
 
-	// Ctrl2CaoMain(DriverObject, RegistryPath);		// ¼üÅÌ¹ýÂË
+	Ctrl2CapMain(DriverObject, RegistryPath);		// ¼üÅÌ¹ýÂË
 
 	return STATUS_SUCCESS;
 }
@@ -64,10 +64,10 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 		ExFreePoolWithTag(g_psRegistryPath->Buffer, 'Path');
 		g_psRegistryPath = NULL;
 	}
-	if (g_demo_cdo)
-		ccpUnloadDemo();
+	//if (g_demo_cdo)
+	//	ccpUnloadDemo();
 
-
+	Ctrl2CapUnload(DriverObject);
 	return;
 }
 

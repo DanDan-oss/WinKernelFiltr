@@ -4,9 +4,16 @@
 
 #include <ntddk.h>
 
-#define KBD_DRIVER_NAME    L"\\Driver\\Kbdclass"            // 键盘类驱动
-#define USBKBD_DRIVER_NAME L"\\Driver\\Kbdhid"            // USB键盘 端口驱动
-#define PS2KBD_DRIVER_NAME L"\\Driver\\i8042prt"        // PS/2键盘 端口驱动
+
+
+#define KEY_MAKE 0
+#define KEY_BREAK 1
+#define KEY_E0 2
+#define KEY_E1 4
+#define KEY_TERMSRV_SET_LED 8
+#define KEY_TERMSRV_SHADOW 0x10
+#define KEY_TERMSRV_VKPACKET 0x20
+
 
 
 /* 自定义设备扩展*/
@@ -62,5 +69,5 @@ NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject);
 /* 解析键盘操作码 */
 NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp);
 
-
+int __stdcall  MakeCodeToAscii(UCHAR sch, const int Kb_Status);		// 将键盘扫描码转换成ASCII码
 #endif // !_CTRL2CAP_H
