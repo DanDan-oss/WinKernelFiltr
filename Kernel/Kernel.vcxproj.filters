@@ -27,11 +27,14 @@
     <ClCompile Include="DEMO\demo.c">
       <Filter>Demo</Filter>
     </ClCompile>
+    <ClCompile Include="Filter\ctrl2hook.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Filter\SerialPort.c">
-      <Filter>Filter</Filter>
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Filter\ctrl2cap.c">
-      <Filter>Filter</Filter>
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -44,15 +47,18 @@
     <ClInclude Include="Filter\ctrl2cap.h">
       <Filter>Filter</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="Sources">
-      <Filter>Resource Files</Filter>
-    </None>
+    <ClInclude Include="Filter\ctrl2hook.h">
+      <Filter>Filter</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\DverCtrl\Win64.asm">
       <Filter>Filter</Filter>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Sources">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

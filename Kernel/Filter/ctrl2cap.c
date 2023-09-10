@@ -3,8 +3,8 @@
 #include <wdm.h>
 
 #define KBD_DRIVER_NAME    L"\\Driver\\Kbdclass"            // 键盘类驱动
-#define USBKBD_DRIVER_NAME L"\\Driver\\Kbdhid"            // USB键盘 端口驱动
-#define PS2KBD_DRIVER_NAME L"\\Driver\\i8042prt"        // PS/2键盘 端口驱动
+
+extern POBJECT_TYPE* IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用. 通用键盘驱动对象的类型*/
 
 // 键盘按键状态
 #define S_SHIFT 1
@@ -47,7 +47,7 @@ char IsShfit[] = {
     0x51, 0x57, 0x45, 0x52, 0x54, 0x59, 0x55, 0x49, 0x4f, 0x50 };
 
 
-extern POBJECT_TYPE* IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用. 通用键盘驱动对象的类型*/
+
 ULONG gC2pKeyCount = 0;		// 当前正在处理的IRP请求数量
 
 
@@ -327,11 +327,6 @@ NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp)
 
 	for (int i = 0; i < KeyBoardNum; ++i)
 	{
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis numKeys:%d\n", KeyBoardNum));
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis scanCode:%x\n", pKeyData->MakeCode));
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis %s\n", pKeyData->Flags ? "Up" : "Down"));
-
-
 		// 测试拦截: W键换成E键, P换成W键
 		if (pKeyData->MakeCode == KBC_W_DOWN)
 			pKeyData->MakeCode = KBC_E_DOWN;

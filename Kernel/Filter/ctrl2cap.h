@@ -1,10 +1,8 @@
-// 键盘过滤
+// 键盘过滤，通过往设备栈中添加新设备的方式过滤数据
 #ifndef _CTRL2CAP_H
 #define _CTRL2CAP_H
 
 #include <ntddk.h>
-
-
 
 #define KEY_MAKE 0
 #define KEY_BREAK 1
