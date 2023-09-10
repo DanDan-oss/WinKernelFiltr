@@ -153,11 +153,13 @@
     <ClCompile Include="DEMO\demo.c" />
     <ClCompile Include="Driver.c" />
     <ClCompile Include="Filter\ctrl2cap.c" />
+    <ClCompile Include="Filter\ctrl2hook.c" />
     <ClCompile Include="Filter\SerialPort.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DEMO\demo.h" />
     <ClInclude Include="Filter\ctrl2cap.h" />
+    <ClInclude Include="Filter\ctrl2hook.h" />
     <ClInclude Include="Filter\SerialPort.h" />
   </ItemGroup>
   <ItemGroup>

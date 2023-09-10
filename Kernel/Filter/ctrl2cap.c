@@ -2,27 +2,41 @@
 #include <ntddk.h>
 #include <wdm.h>
 
+#define KBD_DRIVER_NAME    L"\\Driver\\Kbdclass"            // 键盘类驱动
+
+extern POBJECT_TYPE* IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用. 通用键盘驱动对象的类型*/
+
+// 键盘按键状态
+#define S_SHIFT 1
+#define S_CAPS_LOCK 2
+#define S_NUM_LOCK 4
+
 #define DELAY_ONE_MICROSECOND (-10)
 #define DELAY_ONE_MILLISECOND (DELAY_ONE_MICROSECOND*1000)
 #define DELAY_ONE_SECOND (DELAY_ONE_MILLISECOND*1000)
 
-
-extern POBJECT_TYPE IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用*/
-ULONG gC2pKeyCount = 0;
-
 enum KeyBoardCode
 {
-	KBC_CAPS_LOCK = 0x3A,
-	KBC_LCONTROL = 0x1D,
-	KBC_P = 0x70,
-	KBC_W = 0x77,
-	KBC_w = 0x11,
-	KBC_E = 0x65,
-	KBC_e = 0x12
+	KBC_CAPS_LOCK_DOWN = 0x3A,
+	KBC_CAPS_LOCK_UP = 0xBA,
+	KBC_NUM_LOCK_DOWN=0x45,
+	KBC_NUM_LOCK_UP = 0xC5,
+	KBC_LCTRL_DOWN = 0x1D,
+	KBC_RCTRL_DOWN = 0xE01D,
+	KBC_LCTRL_UP = 0x9D,
+	KBC_RCTRL_UP = 0xE09D,
+	KBC_LSHFIT_DOWN = 0x2A,
+	KBC_RSHFIT_DOWN = 0x36,
+	KBC_LSHFIT_UP = 0xAA,
+	KBC_RSHFIT_UP = 0xB6,
+	KBC_P_DOWN = 0x19,
+	KBC_W_DOWN = 0x11,
+	KBC_A_DOWN = 0x1E,
+	KBC_B_DOWN = 0x30,
+	KBC_E_DOWN = 0x12
 };
 
 //  自定义键盘扫描码的ASCII字符数组
-//  主键键盘数字1-10 字母小写字符(qwertyuiop)
 char UnShift[] = {
     0, 0, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x2d, 0x3d, 0, 0,
     0x71, 0x77, 0x65, 0x72, 0x74, 0x79, 0x75, 0x6C, 0x6F, 0x70 };
@@ -31,6 +45,11 @@ char UnShift[] = {
 char IsShfit[] = {
     0,0,0x21,0x40, 0x23, 0x24, 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29, 0x5f, 0x2b, 0, 0,
     0x51, 0x57, 0x45, 0x52, 0x54, 0x59, 0x55, 0x49, 0x4f, 0x50 };
+
+
+
+ULONG gC2pKeyCount = 0;		// 当前正在处理的IRP请求数量
+
 
 NTSTATUS Ctrl2CapMain(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -162,14 +181,15 @@ NTSTATUS Ctrl2CapDispatchRead(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	IoCopyCurrentIrpStackLocationToNext(Irp);
 	IoSetCompletionRoutine(Irp, Ctrl2CapReadComplete, DeviceObject, TRUE, TRUE, TRUE);
 	return IoCallDriver(devExt->LowerDeviceObject, Irp);
-
 	
 }
+
 
 NTSTATUS Ctrl2CapReadComplete(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context)
 {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	UNREFERENCED_PARAMETER(Context);
+
 
 	// IRP计数器减1,
 	--gC2pKeyCount;
@@ -177,6 +197,7 @@ NTSTATUS Ctrl2CapReadComplete(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Conte
 	//判断当前IRP请求是否执行成功,如果执行成功读取设备流过数据,否则数据没有意义
 	if (NT_SUCCESS(Irp->IoStatus.Status))
 	{
+
 		Ctrl2CapDataAnalysis(Irp);
 	}
 
@@ -202,10 +223,10 @@ NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Regi
 
 	// 通过名字获取驱动对象指针, 获取完毕释放对象,保存指针
 	RtlInitUnicodeString(&strNtNameString, KBD_DRIVER_NAME);
-	nStatus = ObReferenceObjectByName(&strNtNameString, OBJ_CASE_INSENSITIVE, NULL, 0, IoDriverObjectType, KernelMode, NULL, &KbdDriverObject);
+	nStatus = ObReferenceObjectByName(&strNtNameString, OBJ_CASE_INSENSITIVE, NULL, 0, *IoDriverObjectType, KernelMode, NULL, &KbdDriverObject);
 	if (!NT_SUCCESS(nStatus))
 	{
-		KdPrint(("[dbg]: Couldn't get the  KbdDriver Object failed! DrverName=[%wZ]", strNtNameString));
+		KdPrint(("[dbg]: Couldn't get the  KbdDriver Object failed! DrverName=[%wZ]\n", strNtNameString));
 		return(nStatus);
 	}
 
@@ -222,7 +243,7 @@ NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Regi
 
 		if (!NT_SUCCESS(nStatus))
 		{
-			KdPrint(("[dbg]: Couldn't Create the  Filter Device Object failed! STATUS=%x", nStatus));
+			KdPrint(("[dbg]: Couldn't Create the  Filter Device Object failed! STATUS=%x\n", nStatus));
 			return (nStatus);
 		}
 
@@ -230,7 +251,7 @@ NTSTATUS Ctrl2CapAttachDevices(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Regi
 		pLowerDeviceObject = IoAttachDeviceToDeviceStack(pFileteDeviceObject, pTargetDeviceObject);
 		if (!pLowerDeviceObject)
 		{
-			KdPrint(("[dbg]: Couldn't Attach to  Filter Device Object failed."));
+			KdPrint(("[dbg]: Couldn't Attach to  Filter Device Object failed.\n"));
 			IoDeleteDevice(pFileteDeviceObject);
 			pFileteDeviceObject = NULL;
 			return nStatus;
@@ -276,7 +297,7 @@ NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject)
 
 	 if (!devExt->FilterDeviceObject || DeviceObject != devExt->FilterDeviceObject)
 	 {
-		 KdPrint(("[dbg]: Couldn't Detach to  Filter Device Object failed. %p", devExt->FilterDeviceObject));
+		 KdPrint(("[dbg]: Couldn't Detach to  Filter Device Object failed. %p\n", devExt->FilterDeviceObject));
 		 return STATUS_DEVICE_ENUMERATION_ERROR;
 	 }
          
@@ -291,6 +312,9 @@ NTSTATUS Ctrl2DetachDevices(PDEVICE_OBJECT DeviceObject)
 
 NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp)
 {
+	static int Kb_Status = S_NUM_LOCK;
+
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
 	PKEYBOARD_INPUT_DATA pKeyData = NULL;
 	LONGLONG bufLen = 0;	 /* 数据长度*/
 	ULONGLONG KeyBoardNum = 0;            // KEYBOARD_INPUT_DATA结构个数
@@ -299,20 +323,89 @@ NTSTATUS Ctrl2CapDataAnalysis(PIRP Irp)
 	bufLen = Irp->IoStatus.Information;
 	KeyBoardNum = bufLen / sizeof(KEYBOARD_INPUT_DATA);
 
+	KdPrint(("[dbg]: KeyBoard Control Code %d\n", irpsp->Parameters.DeviceIoControl.IoControlCode));
+
 	for (int i = 0; i < KeyBoardNum; ++i)
 	{
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis numKeys:%d\n", KeyBoardNum));
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis scanCode:%x\n", pKeyData->MakeCode));
-		KdPrint(("[dbg]:Ctrl2CapDataAnalysis %s\n", pKeyData->Flags ? "Up" : "Down"));
+		// 测试拦截: W键换成E键, P换成W键
+		if (pKeyData->MakeCode == KBC_W_DOWN)
+			pKeyData->MakeCode = KBC_E_DOWN;
+		if (pKeyData->MakeCode == KBC_P_DOWN)
+			pKeyData->MakeCode = KBC_W_DOWN;
 
+		// 键盘按下
+		if (!pKeyData->Flags)
+		{
+			switch (pKeyData->MakeCode)
+			{
 
-		// 测试拦截: 将Caps Lock键换成Ctrl键. W键换成E键
-		if (pKeyData->MakeCode == KBC_CAPS_LOCK)
-			pKeyData->MakeCode = KBC_LCONTROL;
-		if (pKeyData->MakeCode == KBC_W)
-			pKeyData->MakeCode = KBC_E;
+			case KBC_CAPS_LOCK_DOWN:		// NCaps LOCK
+				Kb_Status ^= S_CAPS_LOCK;
+				break;
 
+			case KBC_NUM_LOCK_DOWN:	// Num Lock
+				Kb_Status ^= S_NUM_LOCK;
+
+			case KBC_LSHFIT_DOWN:	// 左右两个Shift扫描码不相同
+			case KBC_RSHFIT_DOWN:
+				Kb_Status |= S_SHIFT;
+				break;
+
+			default:
+				MakeCodeToAscii((UCHAR)pKeyData->MakeCode, Kb_Status);
+				break;
+			}
+		}	// 键盘弹起
+		else
+		{
+			if ((KBC_LSHFIT_UP == pKeyData->MakeCode || KBC_RSHFIT_UP == pKeyData->MakeCode) &&
+				pKeyData->Flags)
+				Kb_Status &= ~S_SHIFT;
+		}
+
+		pKeyData++;
 	}
 
 	return STATUS_SUCCESS;
+}
+
+
+int __stdcall  MakeCodeToAscii(UCHAR sch, const int Kb_Status)
+{
+	UNREFERENCED_PARAMETER(Kb_Status);
+	UCHAR asciiChar = 0;
+
+	//如果uch小于十进制128,则结果等于,if表达式成立
+	//if ((uch & 0x80) == 0)
+	//{
+	 //    if (uch < 0x47 || (uch >= 0x47 && uch < 0x54 && Kb_Status & S_NUM_LOCK))
+	//        asciiChar = 0;
+	//}
+
+
+	// 这是一个示例函数，用于将扫描码转换为ASCII字符。
+	// 您需要根据具体的键盘布局和扫描码表进行实际的转换。
+	// 此处只是一个简化的示例，您需要根据需要扩展它。
+	// 通常需要考虑大写、小写、Shift键等情况。
+
+	// 这里只是一个示例，实际的转换可能会更复杂。
+	// 返回ASCII字符或0，表示无效的扫描码。
+	// 示例：将扫描码简单地映射为ASCII字符
+
+	switch (sch) {
+	case KBC_A_DOWN: asciiChar = 'A'; break;
+	case KBC_B_DOWN: asciiChar = 'B'; break;
+	case KBC_E_DOWN: asciiChar = 'E'; break;
+	case KBC_P_DOWN: asciiChar = 'P'; break;
+	case KBC_W_DOWN: asciiChar = 'W'; break;
+	// 其他扫描码到ASCII字符的映射
+	// ...
+
+	default:
+		// 如果无法映射，返回0表示无效的扫描码
+		return 0;
+	}
+
+	DbgPrint("[dbg]: 键盘按下-->ScanCode[%x], Data:[%c]\n", sch, asciiChar);
+	return asciiChar;
 }
