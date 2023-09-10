@@ -13,7 +13,6 @@
 #define KEY_TERMSRV_VKPACKET 0x20
 
 
-
 /* 自定义设备扩展*/
 typedef struct _C2P_DEV_EXT
 {
