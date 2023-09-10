@@ -168,53 +168,68 @@ NTSTATUS KeyBoardServiceCallBackHook()
 
 	// 获取驱动对象第一个设备对象的设备扩展
 	UsingDriverObject = KbdHidDriverObject ? KbdHidDriverObject : Kbd8042DriverObject;
-	UsingDeviceObject = UsingDriverObject->DeviceObject;
-	UsingDeviceExt = UsingDeviceObject->DeviceExtension;
 
 	KbdDriverStart = KbdDriverObject->DriverStart;
 	KbdDriverSize = KbdDriverObject->DriverSize;
 	nStatus = STATUS_UNSUCCESSFUL;
 
-	// 遍历端口驱动设备扩展下的每一个指针
-	for (ULONG i = 0; i < 4096; ++i)
+	UsingDeviceObject = UsingDriverObject->DeviceObject;
+	while (UsingDeviceObject)
 	{
-		PVOID DeviceExt = (PCHAR)UsingDeviceExt + i;
-		PVOID Address = NULL;
-		if (!MmIsAddressValid(DeviceExt))
-			continue;
-		Address = *(PVOID*)DeviceExt;
+		UsingDeviceExt = UsingDeviceObject->DeviceExtension;
+		// 遍历端口驱动设备扩展下的每一个指针
+		for (ULONG i = 0; i < 1024; ++i)
+		{
+			PVOID DeviceExt = (PCHAR)UsingDeviceExt + i;
+			PVOID Address = NULL;
+			if (!MmIsAddressValid(DeviceExt))
+				continue;
+			Address = *(PVOID*)DeviceExt;
 
+			// 判断是否已经找到,找到直接跳出
+			if (gKbdClassBack.classDeviceObject && gKbdClassBack.ServiceCallBack)
+			{
+				nStatus = STATUS_SUCCESS;
+				break;
+			}
+
+			// 遍历KdbClass下所有设备, 有一个设备对象会被保存在端口驱动的设备扩展中
+			if (!gKbdClassBack.classDeviceObject)
+			{
+				pTargetDeviceObject = KbdDriverObject->DeviceObject;
+				while (pTargetDeviceObject)
+				{
+					// 判断是否是设备对象地址
+					if (Address == pTargetDeviceObject)
+					{
+						gKbdClassBack.classDeviceObject = (PDEVICE_OBJECT)Address;
+						KdPrint(("[dbg]: Get the classDeiceObject %p\n", Address));
+						break;
+					}
+					pTargetDeviceObject = pTargetDeviceObject->NextDevice;
+				}
+			}
+
+			// 判断是否是回调函数
+			// 键盘类驱动处理函数位于驱动设备之后,并且由于使用了未公开数据结构,这种方式可能暂时是有效的或者在某些情况下是有效的
+			if (Address > KbdDriverStart && Address < (PVOID)((PCHAR)KbdDriverStart + KbdDriverSize) && MmIsAddressValid(Address) && !gKbdClassBack.ServiceCallBack)
+			{
+				gKbdClassBack.ServiceCallBack = (KeyBoardClassServiceCallBack)Address;
+				gKbdClassBack.DevExtCallBackAddress = DeviceExt;
+				KdPrint(("[dbg]: Get the ServiceClaaBack=%p, DevExtCallBackAddress=%p\n", *(PVOID*)DeviceExt, (PVOID)DeviceExt));
+				continue;
+			}
+		}
 		// 判断是否已经找到,找到直接跳出
 		if (gKbdClassBack.classDeviceObject && gKbdClassBack.ServiceCallBack)
 		{
 			nStatus = STATUS_SUCCESS;
 			break;
 		}
-
-		// 遍历KdbClass下所有设备, 有一个设备对象会被保存在端口驱动的设备扩展中
-		pTargetDeviceObject = KbdDriverObject->DeviceObject;
-		while (pTargetDeviceObject)
-		{
-			// 判断是否是设备对象地址
-			if (Address == pTargetDeviceObject)
-			{
-				gKbdClassBack.classDeviceObject = (PDEVICE_OBJECT)Address;
-				KdPrint(("[dbg]: Get the classDeiceObject %p\n", Address));
-				continue;
-			}
-			pTargetDeviceObject = pTargetDeviceObject->NextDevice;
-		}
-
-		// 判断是否是回调函数
-		// 键盘类驱动处理函数位于驱动设备之后,并且由于使用了未公开数据结构,这种方式可能暂时是有效的或者在某些情况下是有效的
-		if (Address > KbdDriverStart && Address < (PVOID)((PCHAR)KbdDriverStart + KbdDriverSize) && MmIsAddressValid(Address))
-		{
-			gKbdClassBack.ServiceCallBack = (KeyBoardClassServiceCallBack)Address;
-			gKbdClassBack.DevExtCallBackAddress = DeviceExt;
-			KdPrint(("[dbg]: Get the ServiceClaaBack=%p, DevExtCallBackAddress=%p\n", *(PVOID*)DeviceExt, (PVOID)DeviceExt));
-			continue;
-		}
+		UsingDeviceObject = UsingDeviceObject->NextDevice;
 	}
+
+	
 
 	if (gKbdClassBack.DevExtCallBackAddress && gKbdClassBack.ServiceCallBack)
 	{
@@ -240,5 +255,6 @@ NTSTATUS KeyBoardServiceCallBackUnHook()
 VOID __stdcall KeyboardServiceCallBackFunc(PDEVICE_OBJECT DeviceObject, PKEYBOARD_INPUT_DATA InputDataStart, PKEYBOARD_INPUT_DATA InputDataEnd, PULONG InputDataConsumed) 
 {
 	// HOOK 函数内部
+	KdPrint(("[dbg]:  Hook KeyboardServiceCallBackFunc Recv Message \n"));
 	gKbdClassBack.ServiceCallBack(DeviceObject, InputDataStart, InputDataEnd, InputDataConsumed);
 }
