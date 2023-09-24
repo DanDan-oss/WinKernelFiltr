@@ -5,16 +5,40 @@
 #define USBKBD_DRIVER_NAME L"\\Driver\\Kbdhid"            // USB键盘 端口驱动
 #define PS2KBD_DRIVER_NAME L"\\Driver\\i8042prt"        // PS/2键盘 端口驱动
 
-extern POBJECT_TYPE* IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用. 通用键盘驱动对象的类型*/
-
 // 通过一个名字来获得一个对象得指针(闭源函数,文档没有公开,声明直接使用了)
 // 调用ObReferenceObjectByName获得对象引用会使驱动对象的引用计数增加,ObDereferenceObject释放驱动对象引用
 NTSTATUS ObReferenceObjectByName(PUNICODE_STRING ObjectName, ULONG Attribuites, PACCESS_STATE AccessState, ACCESS_MASK DesiredAccess,
 	POBJECT_TYPE ObjectType, KPROCESSOR_MODE AccessMode, PVOID ParseContext, PVOID* Object);
 
+extern POBJECT_TYPE* IoDriverObjectType;	/* 内核全局变量, 声明可以直接使用. 通用键盘驱动对象的类型*/
+
+extern  int __stdcall  MakeCodeToAscii(UCHAR sch, const int Kb_Status);
+
+enum KeyBoardCode
+{
+	KBC_CAPS_LOCK_DOWN = 0x3A,
+	KBC_CAPS_LOCK_UP = 0xBA,
+	KBC_NUM_LOCK_DOWN = 0x45,
+	KBC_NUM_LOCK_UP = 0xC5,
+	KBC_LCTRL_DOWN = 0x1D,
+	KBC_RCTRL_DOWN = 0xE01D,
+	KBC_LCTRL_UP = 0x9D,
+	KBC_RCTRL_UP = 0xE09D,
+	KBC_LSHFIT_DOWN = 0x2A,
+	KBC_RSHFIT_DOWN = 0x36,
+	KBC_LSHFIT_UP = 0xAA,
+	KBC_RSHFIT_UP = 0xB6,
+	KBC_P_DOWN = 0x19,
+	KBC_W_DOWN = 0x11,
+	KBC_A_DOWN = 0x1E,
+	KBC_B_DOWN = 0x30,
+	KBC_E_DOWN = 0x12
+};
+
 KBD_CALLBACK gKbdClassBack = { 0 };
 
 PDRIVER_DISPATCH OldDispatchFunction[IRP_MJ_MAXIMUM_FUNCTION] = { 0 };
+
 
 NTSTATUS Ctrl2HookMain(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -173,6 +197,7 @@ NTSTATUS KeyBoardServiceCallBackHook()
 	KbdDriverSize = KbdDriverObject->DriverSize;
 	nStatus = STATUS_UNSUCCESSFUL;
 
+	// 遍历键盘端口驱动下的所有设备
 	UsingDeviceObject = UsingDriverObject->DeviceObject;
 	while (UsingDeviceObject)
 	{
@@ -254,7 +279,26 @@ NTSTATUS KeyBoardServiceCallBackUnHook()
 
 VOID __stdcall KeyboardServiceCallBackFunc(PDEVICE_OBJECT DeviceObject, PKEYBOARD_INPUT_DATA InputDataStart, PKEYBOARD_INPUT_DATA InputDataEnd, PULONG InputDataConsumed) 
 {
-	// HOOK 函数内部
+
+	// HOOK KeyboardServiceCallBack函数
 	KdPrint(("[dbg]:  Hook KeyboardServiceCallBackFunc Recv Message \n"));
+	KdPrint(("[dbg]:  DeviceObject=%p InputDataConsumed=%ld \n", DeviceObject, *InputDataConsumed));
+	KdPrint(("[dbg]:  InputDataStart address=%p InputDataEnd address=%p \n", InputDataStart, InputDataEnd));
+
+	for (ULONG i= 0; i < InputDataEnd- InputDataStart; ++i)
+	{
+		KdPrint(("[dbg]:  InputDataStart address=%p id=%d, makecode=%x \n", InputDataStart+i, (InputDataStart+i)->UnitId, (InputDataStart+i)->MakeCode));
+		MakeCodeToAscii((UCHAR)(InputDataStart+i)->MakeCode, 0);
+	}
+
+	// 主动调用回调函数，发送一个 1 的按键消息,这样不论发送什么消息,都会多加一个1
+	KEYBOARD_INPUT_DATA fakeKey = *InputDataStart;
+	fakeKey.MakeCode = 2; // 按键 1 的scancode 是 2
+	PKEYBOARD_INPUT_DATA fakeInputDataStart = &fakeKey;
+	PKEYBOARD_INPUT_DATA fakeInputDataEnd = fakeInputDataStart + 1;
+	ULONG fakeInputDataConsumed = 0;
+
+	KdPrint(("[dbg]:  插入按键1 \n"));
+	gKbdClassBack.ServiceCallBack(DeviceObject, fakeInputDataStart, fakeInputDataEnd, &fakeInputDataConsumed);
 	gKbdClassBack.ServiceCallBack(DeviceObject, InputDataStart, InputDataEnd, InputDataConsumed);
 }
