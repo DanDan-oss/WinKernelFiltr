@@ -42,6 +42,9 @@
     <ClCompile Include="Filter\SerialPor\SerialPort.c">
       <Filter>Filter\SerialPor</Filter>
     </ClCompile>
+    <ClCompile Include="Filter\KeyBord\ctrl2IDTHook.c">
+      <Filter>Filter\KeyBord</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DEMO\demo.h">
@@ -56,15 +59,18 @@
     <ClInclude Include="Filter\SerialPor\SerialPort.h">
       <Filter>Filter\SerialPor</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="..\DverCtrl\Win64.asm">
-      <Filter>Filter</Filter>
-    </CustomBuild>
+    <ClInclude Include="Filter\KeyBord\ctrl2IDTHook.h">
+      <Filter>Filter\KeyBord</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Sources">
       <Filter>Resource Files</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="Filter\KeyBord\Win64.asm">
+      <Filter>Filter\KeyBord</Filter>
+    </MASM>
   </ItemGroup>
 </Project>

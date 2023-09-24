@@ -2,4 +2,5 @@ TARGETNAME=FirstDriver
 TARGETTYPE=DRIVER
 INCLUDES= DEMO 
 SOURCES= Driver.c DEMO/demo.c \
-		Filter/SerialPort.c 
+		Filter/SerialPor/SerialPort.c \
+		Filter/KeyBord/ctrl2cap.c Filter/KeyBord/ctrl2hook.c
