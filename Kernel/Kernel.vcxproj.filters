@@ -19,6 +19,12 @@
     <Filter Include="Demo">
       <UniqueIdentifier>{d366fcd8-221d-4134-8cca-fc819c218970}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Filter\KeyBord">
+      <UniqueIdentifier>{8497f600-ae09-4045-9441-4e1569bc0544}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Filter\SerialPor">
+      <UniqueIdentifier>{47ab6ae4-cee0-4dd6-a549-73ed7697e752}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Driver.c">
@@ -27,38 +33,44 @@
     <ClCompile Include="DEMO\demo.c">
       <Filter>Demo</Filter>
     </ClCompile>
-    <ClCompile Include="Filter\ctrl2hook.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Filter\KeyBord\ctrl2cap.c">
+      <Filter>Filter\KeyBord</Filter>
     </ClCompile>
-    <ClCompile Include="Filter\SerialPort.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Filter\KeyBord\ctrl2hook.c">
+      <Filter>Filter\KeyBord</Filter>
     </ClCompile>
-    <ClCompile Include="Filter\ctrl2cap.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Filter\SerialPor\SerialPort.c">
+      <Filter>Filter\SerialPor</Filter>
+    </ClCompile>
+    <ClCompile Include="Filter\KeyBord\ctrl2IDTHook.c">
+      <Filter>Filter\KeyBord</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DEMO\demo.h">
       <Filter>Demo</Filter>
     </ClInclude>
-    <ClInclude Include="Filter\SerialPort.h">
-      <Filter>Filter</Filter>
+    <ClInclude Include="Filter\KeyBord\ctrl2cap.h">
+      <Filter>Filter\KeyBord</Filter>
     </ClInclude>
-    <ClInclude Include="Filter\ctrl2cap.h">
-      <Filter>Filter</Filter>
+    <ClInclude Include="Filter\KeyBord\ctrl2hook.h">
+      <Filter>Filter\KeyBord</Filter>
     </ClInclude>
-    <ClInclude Include="Filter\ctrl2hook.h">
-      <Filter>Filter</Filter>
+    <ClInclude Include="Filter\SerialPor\SerialPort.h">
+      <Filter>Filter\SerialPor</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="..\DverCtrl\Win64.asm">
-      <Filter>Filter</Filter>
-    </CustomBuild>
+    <ClInclude Include="Filter\KeyBord\ctrl2IDTHook.h">
+      <Filter>Filter\KeyBord</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Sources">
       <Filter>Resource Files</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="Filter\KeyBord\Win64.asm">
+      <Filter>Filter\KeyBord</Filter>
+    </MASM>
   </ItemGroup>
 </Project>

@@ -1,9 +1,10 @@
 #include <ntddk.h>
 #include <Ntstrsafe.h>
 #include "DEMO/demo.h"
-#include "Filter/SerialPort.h"
+#include "Filter/SerialPor/SerialPort.h"
 //#include "Filter/ctrl2cap.h"
-#include "Filter/ctrl2hook.h"
+#include "Filter/KeyBord/ctrl2hook.h"
+#include "Filter/KeyBord/ctrl2IDTHook.h"
 
 extern PDRIVER_OBJECT g_poDriverObject = NULL;
 extern PUNICODE_STRING g_psRegistryPath = NULL;
@@ -64,6 +65,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 		//	DriverObject->MajorFunction[i] = cwkDispatch;
 	}
 
+	GetIdtIsr(0x93);
 	// DemoMain();
 	// SerialPortMain(DriverObject);		// 串口过滤
 
@@ -71,7 +73,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
 
 	// 键盘端口驱动函数HOOK
-	Ctrl2HookMain(DriverObject, RegistryPath);
+	//Ctrl2HookMain(DriverObject, RegistryPath);
 	return STATUS_SUCCESS;
 }
 
