@@ -1,11 +1,15 @@
 #include <ntddk.h>
 #include <wdf.h>
 
-#define NT_DEVICE_NAME L"\\Device\\Ramdisk"
+#include "RamDisk.h"
 
+DRIVER_INITIALIZE DriverEntry;
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 VOID DriverUnload(PDRIVER_OBJECT DriverObject);					// 驱动卸载回调函数
-NTSTATUS RamDiskEvtDeviceAdd(WDFDRIVER DriverObject, PWDFDEVICE_INIT DeviceInit);
+
+#ifdef ALLOC_PRAGMA
+#pragma alloc_text(INIT, DriverEntry)
+#endif
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -21,33 +25,15 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 	KdPrint(("[dbg:%ws] Windows Ramdisk Driver - Driver Framework Edition \n", __FUNCTIONW__));
 	KdPrint(("[dbg:%ws] Built %s %s \n", __FUNCTIONW__, __DATE__, __TIME__));
 
-	
-	WDF_DRIVER_CONFIG_INIT(&config, RamDiskEvtDeviceAdd);
-	return WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, WDF_NO_HANDLE);
+	if (RegistryPath && DriverObject)
+	{
+		WDF_DRIVER_CONFIG_INIT(&config, RamDiskEvtDeviceAdd);
+		return WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, WDF_NO_HANDLE);
+	}
+	return STATUS_UNSUCCESSFUL;
 }
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 {
 	KdPrint(("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId()));
-}
-
-NTSTATUS RamDiskEvtDeviceAdd(WDFDRIVER DriverObject, PWDFDEVICE_INIT DeviceInit)
-{
-	UNREFERENCED_PARAMETER(DriverObject);
-
-	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
-	WDFDEVICE wdfDevice = NULL;						// 新建设备
-	WDFQUEUE wdfQueue = NULL;;						// 新建队列
-	WDF_IO_QUEUE_CONFIG ioQueueConfig = { 0 };		// 要建立的队列配置
-	WDF_OBJECT_ATTRIBUTES deviceAttributes = { 0 };	// 要建立的设备对象的属性描述
-	WDF_OBJECT_ATTRIBUTES queueAttributes = { 0 };	// 要建立的队列对象的属性描述
-	PDEVOBJ_EXTENSION wdfDeviceExtension = NULL;	// 设备扩展
-	PQUEUE_EXTENSION wdfQueueContext = NULL;		// 队列扩展
-
-	UNICODE_STRING ntDeviceName = { 0 };
-
-	DECLARE_CONST_UNICODE_STRING(ntDeviceName, NT_DEVICE_NAME);
-	PAGED_CODE();
-
-	return STATUS_SUCCESS;
 }
