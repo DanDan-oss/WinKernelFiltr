@@ -9,6 +9,8 @@ NTSTATUS RamDiskEvtDeviceAdd(WDFDRIVER DriverObject, PWDFDEVICE_INIT DeviceInit)
 {
 	UNREFERENCED_PARAMETER(DriverObject);
 
+
+	KdPrint(("[dbg]:添加虚拟磁盘设备\n"));
 	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
 	WDFDEVICE wdfDevice = NULL;						// 新建设备
 	WDFQUEUE wdfQueue = NULL;;						// 新建队列
@@ -85,6 +87,87 @@ NTSTATUS RamDiskEvtDeviceAdd(WDFDRIVER DriverObject, PWDFDEVICE_INIT DeviceInit)
 	return nStatus;
 }
 
+VOID RamDiskEvtDeviceContextCleanup(IN WDFDEVICE Device)
+{
+	KdPrint(("[dbg]:清理虚拟磁盘设备\n"));
+	PDEVICE_EXTENSION devExt = DeviceGetExtension(Device);
+	PAGED_CODE();
+	if (devExt->DiskImage)
+	{
+		ExFreePoolWithTag(devExt->DiskImage, RAMDISK_TAG);
+		devExt->DiskImage = NULL;
+	}
+}
+
+VOID RamDiskQueryDiskRegParameters(PWCHAR RegistryPath, PDISK_INFO DiskRegInfo)
+{
+	RTL_QUERY_REGISTRY_TABLE rtlQueryRegTabl[5 + 1] = { 0 };
+	DISK_INFO defDiskRegInfo = { 0 };
+	NTSTATUS nStatus = STATUS_UNSUCCESSFUL;
+
+	PAGED_CODE();
+	ASSERT(NULL != RegistryPath);
+
+	defDiskRegInfo.DiskSize = DEFAULT_DISK_SIZE;
+	defDiskRegInfo.RootDirEntries = DEFAULT_ROOT_DIR_ENTRIES;
+	defDiskRegInfo.SectorsPerCluster = DEFAULT_SECTORS_PER_CLUSTER;
+
+	RtlInitUnicodeString(&defDiskRegInfo.DriveLetter, DEFAULT_DRIVE_LETTER);
+	RtlZeroMemory(rtlQueryRegTabl, sizeof(rtlQueryRegTabl));
+
+	// 设置查询表
+	rtlQueryRegTabl[0].Flags = RTL_QUERY_REGISTRY_SUBKEY;
+	rtlQueryRegTabl[0].Name = L"Parameters";
+	rtlQueryRegTabl[0].EntryContext = NULL;
+	rtlQueryRegTabl[0].DefaultType = (ULONG_PTR)NULL;
+	rtlQueryRegTabl[0].DefaultData = NULL;
+	rtlQueryRegTabl[0].DefaultLength = (ULONG_PTR)NULL;
+
+	// 磁盘参数
+	rtlQueryRegTabl[1].Flags = RTL_QUERY_REGISTRY_DIRECT;
+	rtlQueryRegTabl[1].Name = L"DiskSize";
+	rtlQueryRegTabl[1].EntryContext = &DiskRegInfo->DiskSize;
+	rtlQueryRegTabl[1].DefaultType = REG_DWORD;
+	rtlQueryRegTabl[1].DefaultData = &defDiskRegInfo.DiskSize;
+	rtlQueryRegTabl[1].DefaultLength = sizeof(ULONG);
+
+	rtlQueryRegTabl[2].Flags = RTL_QUERY_REGISTRY_DIRECT;
+	rtlQueryRegTabl[2].Name = L"RootDirEntries";
+	rtlQueryRegTabl[2].EntryContext = &DiskRegInfo->RootDirEntries;
+	rtlQueryRegTabl[2].DefaultType = REG_DWORD;
+	rtlQueryRegTabl[2].DefaultData = &defDiskRegInfo.RootDirEntries;
+	rtlQueryRegTabl[2].DefaultLength = sizeof(ULONG);
+
+	rtlQueryRegTabl[3].Flags = RTL_QUERY_REGISTRY_DIRECT;
+	rtlQueryRegTabl[3].Name = L"SectorsPerCluster";
+	rtlQueryRegTabl[3].EntryContext = &DiskRegInfo->SectorsPerCluster;
+	rtlQueryRegTabl[3].DefaultType = REG_DWORD;
+	rtlQueryRegTabl[3].DefaultData = &defDiskRegInfo.SectorsPerCluster;
+	rtlQueryRegTabl[3].DefaultLength = sizeof(ULONG);
+
+	rtlQueryRegTabl[4].Flags = RTL_QUERY_REGISTRY_DIRECT;
+	rtlQueryRegTabl[4].Name = L"DriveLetter";
+	rtlQueryRegTabl[4].EntryContext = &DiskRegInfo->DriveLetter;
+	rtlQueryRegTabl[4].DefaultType = REG_SZ;
+	rtlQueryRegTabl[4].DefaultData = &defDiskRegInfo.DriveLetter.Buffer;
+	rtlQueryRegTabl[4].DefaultLength = 0;
+
+	nStatus = RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE | RTL_REGISTRY_OPTIONAL, RegistryPath, rtlQueryRegTabl, NULL, NULL);
+	if (!NT_SUCCESS(nStatus))
+	{
+		DiskRegInfo->DiskSize = defDiskRegInfo.DiskSize;
+		DiskRegInfo->RootDirEntries = defDiskRegInfo.RootDirEntries;
+		DiskRegInfo->SectorsPerCluster = defDiskRegInfo.SectorsPerCluster;
+		RtlCopyUnicodeString(&DiskRegInfo->DriveLetter, &defDiskRegInfo.DriveLetter);
+	}
+
+	KdPrint(("[dbg]: DiskSize          = 0x%lx\n", DiskRegInfo->DiskSize));
+	KdPrint(("[dbg]: RootDirEntries    = 0x%lx\n", DiskRegInfo->RootDirEntries));
+	KdPrint(("[dbg]: SectorsPerCluster = 0x%lx\n", DiskRegInfo->SectorsPerCluster));
+	KdPrint(("[dbg]: DriveLetter       = %wZ\n", &(DiskRegInfo->DriveLetter)));
+	return;
+}
+
 NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt)
 {
 	PBOOT_SECTOR bootSector = (PBOOT_SECTOR)devExt->DiskImage;	// 磁盘启动扇区
@@ -111,6 +194,11 @@ NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt)
 	devExt->DiskGeometry.Cylinders.QuadPart = devExt->DiskRegInfo.DiskSize / 512 / 32 / 2;
 	devExt->DiskGeometry.MediaType = RAMDISK_MEDIA_TYPE;
 
+	KdPrint(("[dbg]: Cylinders: %lld\n TracksPerCylinder: %ld\n SectorsPerTrack: %ld\n BytesPerSector: %ld\n",
+		devExt->DiskGeometry.Cylinders.QuadPart, devExt->DiskGeometry.TracksPerCylinder,
+		devExt->DiskGeometry.SectorsPerTrack, devExt->DiskGeometry.BytesPerSector
+		));
+
 	// 初始化根目录入口
 	rootDirEntries = devExt->DiskRegInfo.RootDirEntries;
 	sectorsPerCluster = devExt->DiskRegInfo.SectorsPerCluster;
@@ -125,9 +213,9 @@ NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt)
 	bootSector->bsOemNamep[0] = 'D';
 	bootSector->bsOemNamep[1] = 'a';
 	bootSector->bsOemNamep[2] = 'n';
-	bootSector->bsOemNamep[3] = 'D';
+	bootSector->bsOemNamep[3] = 'R';
 	bootSector->bsOemNamep[4] = 'a';
-	bootSector->bsOemNamep[5] = 'n';
+	bootSector->bsOemNamep[5] = 'm';
 	bootSector->bsOemNamep[6] = ' ';
 	bootSector->bsOemNamep[7] = ' ';
 	bootSector->bsBytesPerSec = (USHORT)devExt->DiskGeometry.BytesPerSector;
@@ -159,16 +247,16 @@ NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt)
 	bootSector->bsHeads = (USHORT)devExt->DiskGeometry.TracksPerCylinder;
 	bootSector->bsBootSignature = 0x29;
 	bootSector->bsVolumeID = 0x12344321;
-	bootSector->bsLable[0] = 'D';
+	bootSector->bsLable[0] = 'R';
 	bootSector->bsLable[1] = 'a';
-	bootSector->bsLable[2] = 'n';
+	bootSector->bsLable[2] = 'm';
 	bootSector->bsLable[3] = 'D';
-	bootSector->bsLable[4] = 'a';
-	bootSector->bsLable[5] = 'n';
-	bootSector->bsLable[6] = 'D';
-	bootSector->bsLable[7] = 'i';
-	bootSector->bsLable[8] = 's';
-	bootSector->bsLable[9] = 'k';
+	bootSector->bsLable[4] = 'i';
+	bootSector->bsLable[5] = 's';
+	bootSector->bsLable[6] = 'k';
+	bootSector->bsLable[7] = ' ';
+	bootSector->bsLable[8] = ' ';
+	bootSector->bsLable[9] = ' ';
 	bootSector->bsLable[10] = ' ';
 	bootSector->bsFileSystemType[0] = 'F';
 	bootSector->bsFileSystemType[1] = 'A';
@@ -208,6 +296,114 @@ NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt)
 	return STATUS_SUCCESS;
 }
 
+BOOLEAN RamDiskCheckParameters(PDEVICE_EXTENSION devExt, LARGE_INTEGER ByteOffset, size_t Length)
+{
+	// TODO: 检查是否存在无效参数. 起始偏移量+长度超过缓冲区长度,或者长度不是扇区大小的适当倍数,都是一个错误
+	if (devExt->DiskRegInfo.DiskSize < Length || ByteOffset.QuadPart < 0 ||
+		((ULONGLONG)ByteOffset.QuadPart > (ULONGLONG)devExt->DiskRegInfo.DiskSize) ||
+		(Length & (devExt->DiskGeometry.BytesPerSector - 1)))
+	{
+		KdPrint(("[dbg]: Error invalid parameter, ByteOffset: %lld Length: %lld\n",ByteOffset.QuadPart, Length));
+		return FALSE;
+	}
+	return TRUE;
+}
+
+VOID RamDiskEvtIoRead(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
+{
+	PDEVICE_EXTENSION devExt = QueueGetExtension(Queue)->DeviceExtension;	
+	WDF_REQUEST_PARAMETERS  wdfParameters = { 0 };
+	LARGE_INTEGER byteOffset = { 0 };
+	WDFMEMORY hMemory = NULL;
+	NTSTATUS nStatus = STATUS_INVALID_PARAMETER;
+
+	WDF_REQUEST_PARAMETERS_INIT(&wdfParameters);
+	WdfRequestGetParameters(Request, &wdfParameters);
+	byteOffset.QuadPart = wdfParameters.Parameters.Read.DeviceOffset;
+	// LOG: 判断读取范围不能超过磁盘镜像大小且扇区必须对齐
+	if (RamDiskCheckParameters(devExt, byteOffset, Length))
+	{
+		nStatus = WdfRequestRetrieveOutputMemory(Request, &hMemory);
+		if (NT_SUCCESS(nStatus))
+			nStatus = WdfMemoryCopyFromBuffer(hMemory, 0, devExt->DiskImage + byteOffset.LowPart, Length);
+	}
+	WdfRequestCompleteWithInformation(Request, nStatus, (ULONG_PTR)Length);
+}
+
+VOID RamDiskEvtIoWrite(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
+{
+	PDEVICE_EXTENSION devExt = QueueGetExtension(Queue)->DeviceExtension;
+	WDF_REQUEST_PARAMETERS  wdfParameters = { 0 };
+	LARGE_INTEGER byteOffset = { 0 };
+	WDFMEMORY hMemory = NULL;
+	NTSTATUS nStatus = STATUS_INVALID_PARAMETER;
+
+	WDF_REQUEST_PARAMETERS_INIT(&wdfParameters);
+	WdfRequestGetParameters(Request, &wdfParameters);
+	byteOffset.QuadPart = wdfParameters.Parameters.Read.DeviceOffset;
+	// LOG: 判断读取范围不能超过磁盘镜像大小且扇区必须对齐
+	if (RamDiskCheckParameters(devExt, byteOffset, Length))
+	{
+		nStatus = WdfRequestRetrieveOutputMemory(Request, &hMemory);
+		if (NT_SUCCESS(nStatus))
+			nStatus = WdfMemoryCopyToBuffer(hMemory, 0, devExt->DiskImage + byteOffset.LowPart, Length);
+	}
+	WdfRequestCompleteWithInformation(Request, nStatus, (ULONG_PTR)Length);
+}
+
+VOID RamDiskEvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputBufferLength, size_t InputBufferLength, ULONG IoControlCode)
+{
+	PDEVICE_EXTENSION devExt = QueueGetExtension(Queue)->DeviceExtension;
+	ULONG_PTR information = 0;
+	size_t bufSize = 0;
+	NTSTATUS nStatus = STATUS_INVALID_DEVICE_REQUEST;
+
+	UNREFERENCED_PARAMETER(OutputBufferLength);
+	UNREFERENCED_PARAMETER(InputBufferLength);
+	switch (IoControlCode)
+	{
+	case IOCTL_DISK_GET_PARTITION_INFO: {	// 获取分区信息
+		PPARTITION_INFORMATION outputBuffer = NULL;
+		PBOOT_SECTOR bootSector = (PBOOT_SECTOR)devExt->DiskImage;
+		information = sizeof(PARTITION_INFORMATION);
+		nStatus = WdfRequestRetrieveOutputBuffer(Request, information, &outputBuffer, &bufSize);
+		if (NT_SUCCESS(nStatus))
+		{
+			outputBuffer->PartitionType = (bootSector->bsFileSystemType[4] == '6') ? PARTITION_FAT_16 : PARTITION_FAT_12;
+			outputBuffer->BootIndicator = FALSE;
+			outputBuffer->RecognizedPartition = TRUE;
+			outputBuffer->RewritePartition = FALSE;
+			outputBuffer->StartingOffset.QuadPart = 0;
+			outputBuffer->PartitionLength.QuadPart = devExt->DiskRegInfo.DiskSize;
+			outputBuffer->HiddenSectors = (ULONG)(1L);
+			outputBuffer->PartitionNumber = (ULONG)(-1L);
+			nStatus = STATUS_SUCCESS;
+		}
+	}
+	break;
+
+	case IOCTL_DISK_GET_DRIVE_GEOMETRY: {	// 获取磁盘扇区
+		PDISK_GEOMETRY outputBuffer = NULL;
+		information = sizeof(DISK_GEOMETRY);
+		nStatus = WdfRequestRetrieveOutputBuffer(Request, information, &outputBuffer, &bufSize);
+		if (NT_SUCCESS(nStatus) && bufSize >= information)
+		{
+			RtlCopyMemory(outputBuffer, &(devExt->DiskGeometry), information);
+			nStatus = STATUS_SUCCESS;
+		}
+	}
+	break;
+
+	case IOCTL_DISK_CHECK_VERIFY:
+	case IOCTL_DISK_IS_WRITABLE:
+		nStatus = STATUS_SUCCESS;
+	break;
+
+	default:
+	break;
+	}
+	WdfRequestCompleteWithInformation(Request, nStatus, information);
+}
 
 
 

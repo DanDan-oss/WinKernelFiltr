@@ -16,14 +16,14 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 	WDF_DRIVER_CONFIG config;
 
 	if(RegistryPath)
-		KdPrint(("[dbg:%ws]Driver RegistryPath:%wZ \n", __FUNCTIONW__, RegistryPath));
+		KdPrint(("[dbg][%ws] Driver RegistryPath:%wZ \n", __FUNCTIONW__, RegistryPath));
 	if (DriverObject)
 	{
 		DriverObject->DriverUnload = DriverUnload;
-		KdPrint(("[dbg:%ws]Driver Object Address:%p, Current IRQL=0x%u\n", __FUNCTIONW__, DriverObject, KeGetCurrentIrql()));
+		KdPrint(("[dbg][%ws]Driver Object Address:%p, Current IRQL=0x%u\n", __FUNCTIONW__, DriverObject, KeGetCurrentIrql()));
 	}
-	KdPrint(("[dbg:%ws] Windows Ramdisk Driver - Driver Framework Edition \n", __FUNCTIONW__));
-	KdPrint(("[dbg:%ws] Built %s %s \n", __FUNCTIONW__, __DATE__, __TIME__));
+	KdPrint(("[dbg][%ws] Windows Ramdisk Driver - Driver Framework Edition \n", __FUNCTIONW__));
+	KdPrint(("[dbg][%ws] Built %s %s \n", __FUNCTIONW__, __DATE__, __TIME__));
 
 	if (RegistryPath && DriverObject)
 	{
@@ -35,5 +35,5 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject)
 {
-	KdPrint(("[dbg:%ws]Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId()));
+	KdPrint(("[dbg][%ws] Driver Unload, Driver Object Address:%p, Current Process ID=%p\n", __FUNCTIONW__, DriverObject, PsGetCurrentProcessId()));
 }

@@ -5,7 +5,7 @@
 #include <wdf.h>
 #include <ntdddisk.h>
 
-#define NT_DEVICE_NAME                  L"\\Device\\DanDanDisk"
+#define NT_DEVICE_NAME                  L"\\Device\\Ramdisk"
 #define DOS_DEVICE_NAME                 L"\\DosDevices\\"
 
 #define RAMDISK_TAG                     'DanR'  // "DanR"
@@ -30,6 +30,7 @@
 #define DIR_ATTR_DIRECTORY  0x10
 #define DIR_ATTR_ARCHIVE    0x20
 
+
 typedef struct _DISK_INFO
 {
 	ULONG DiskSize;				// 磁盘大小,以字节计算,磁盘最大只有4GB
@@ -41,7 +42,7 @@ typedef struct _DISK_INFO
 typedef struct _DEVICE_EXTENSION 
 {
 	PUCHAR DiskImage;			// 指向内存区域,内存盘实际数据数据存储空间
-	DISK_GEOMETRY DiskGeometry;	// 存储内存盘的磁盘Geometry
+	DISK_GEOMETRY DiskGeometry;	// 存储内存盘的磁盘Geometry扇区
 	DISK_INFO DiskRegInfo;		// 磁盘信息结构,安装时存放在注册表中
 	UNICODE_STRING SymbolicLink;	// 盘的符号链接
 	WCHAR DriverLetterBuffer[DRIVE_LETTER_BUFFER_SIZE];		// DiskRegInfo中DriverLetter存储空间,用户在注册表中指定的盘符
@@ -56,6 +57,7 @@ typedef struct _QUEUE_EXTENSION {
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(QUEUE_EXTENSION, QueueGetExtension)
 
+#pragma pack(1)
 typedef struct _BOOT_SECTOR
 {
 	UCHAR bsJump[3];		// 跳转指令,跳转代DBR引导程序
@@ -93,12 +95,13 @@ typedef struct _DIR_ENTRY
 	USHORT deStartCluster;	// 文件第一个簇的编号
 	ULONG deFileSize;		// 文件大小
 }DIR_ENTRY, *PDIR_ENTRY;
-
+#pragma pack()
 
 NTSTATUS RamDiskEvtDeviceAdd(WDFDRIVER DriverObject, PWDFDEVICE_INIT DeviceInit);	// 添加虚拟磁盘设备并初始化
 VOID RamDiskEvtDeviceContextCleanup(IN WDFDEVICE Device);							// 清理创建的虚拟磁盘
 VOID RamDiskQueryDiskRegParameters(PWCHAR RegistryPath, PDISK_INFO DiskRegInfo);	//为磁盘映像分配内存
 NTSTATUS RamDiskFormatDisk(PDEVICE_EXTENSION devExt);	// 格式化虚拟磁盘
+BOOLEAN RamDiskCheckParameters(PDEVICE_EXTENSION devExt, LARGE_INTEGER ByteOffset, size_t Length);
 
 VOID RamDiskEvtIoRead(WDFQUEUE Queue, WDFREQUEST Request, size_t Length);
 VOID RamDiskEvtIoWrite(WDFQUEUE Queue, WDFREQUEST Request, size_t Length);
