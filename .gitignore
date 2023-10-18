@@ -4,3 +4,7 @@
 /Kernel/x64
 /DverCtrl/x64
 /Kernel/ARM
+/Kernel/Filter/KeyBord/x64
+/Kernel/Filter/KeyBord/.vs
+/Kernel/Disk/RamDisk/x64
+/Kernel/Disk/FilterDisk/Debug

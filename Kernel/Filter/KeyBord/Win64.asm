@@ -4,12 +4,11 @@ p2cUserFilter PROTO C
 
 .data
 	BaseSetLastNTError qword 0
-	G_IDTBASE qword 0
 .const
 
 .code
 
-;void* GetIdtBase()£»
+;VOID* GetIdtBase(PP2C_IDTR64 idtr);
 GetIdtBase proc
 	push rbp
 	sub rsp, 010h
@@ -73,5 +72,6 @@ p2cInterrupProc proc uses rax,
 	jmp g_p2c_old
 	ret
 p2cInterrupProc endp
+
 
 end

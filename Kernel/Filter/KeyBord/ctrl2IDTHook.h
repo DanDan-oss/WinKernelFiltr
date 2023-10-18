@@ -9,6 +9,9 @@ typedef unsigned short P2C_U16;
 typedef unsigned long P2C_U32;
 typedef unsigned long long P2C_U64;
 
+#define OBUFFER_FULL 0x02
+#define IBUFFER_FULL 0x01
+
 #define P2C_MAKELONG32(low, high) ((P2C_U32)(((P2C_U16)((P2C_U32)(low) & 0xffff)) | \
 								((P2C_U32)((P2C_U16)((P2C_U32)(high) & 0xffff))) <<16))
 #define P2C_MAKELONG64(low, high) ((P2C_U64)(((P2C_U32)((P2C_U64)(low) & 0xffffffff)) | \
@@ -81,5 +84,11 @@ typedef struct _P2C_IDT_ENTRY64
 
 void* GetIdtIsr(unsigned int Index);
 
+
 //void p2cHookInt93(BOOLEAN hook_or_unhook); // HOOK adn UNHOOK
+
+
+void _stdcall p2cUserFilter();
+ULONG _stdcall p2cWaitForkbRead();
+ULONG _stdcall p2cWaitForkbWrite();
 #endif // !_CTRL2_IDT_HOOK_H
