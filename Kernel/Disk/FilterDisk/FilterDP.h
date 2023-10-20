@@ -19,7 +19,7 @@ typedef struct _DP_BITMAP
 	DWORD regionNumber;	// 这个bitmap总共有多少块
 	DWORD regionReferSize;	// 块对应的实际字节, 这个值应该是 sectorSize * byteSize * regionSize
 	QWORD bitmapReferSize;	// 这个bitmap对应的实际字节数, 这个值应该是 sectorSize * byteSize * regionSize * regionNumber
-	tBitmap** BitMap;		// 指向bitmap空间
+	tBitmap** BitMap;		// 指向bitmap空间.指针数组[]
 	PVOID lockBitmap;
 }DP_BITMAP, *PDP_BITMAP;
 
@@ -61,5 +61,7 @@ NTSTATUS NTAPI DPDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 
 
 NTSTATUS DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, _In_reads_opt_(_Inexpressible_("varies")) PVOID Context);
+NTSTATUS DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber);
+NTSTATUS DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length);
 #endif // !_DISK_DIRVER_H
 
