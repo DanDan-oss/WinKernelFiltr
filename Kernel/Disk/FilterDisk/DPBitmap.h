@@ -1,5 +1,6 @@
-#ifndef _DP_DIRVER_H
-#define _DP_DIRVER_H
+
+#ifndef _DP_BITMAP_H
+#define _DP_BITMAP_H
 
 #include <ntddk.h>
 #include <wdf.h>
@@ -10,6 +11,7 @@ typedef  unsigned long int DWORD;
 typedef  unsigned long long int QWORD;
 typedef  unsigned char tBitmap;
 
+#define SPARSE_FILE_NAME L"\\??\\C:\\temp.dat"
 
 typedef struct _DP_BITMAP
 {
@@ -53,15 +55,11 @@ typedef struct _VOLUME_ONLINE_CONTEXT
 	PKEVENT Event;						//在volume_online的DeviceIoControl中传给完成函数的同步事件
 }VOLUME_ONLINE_CONTEXT, *PVOLUME_ONLINE_CONTEXT;
 
-NTSTATUS NTAPI DPAddDevice(PDRIVER_OBJECT DriverObject, PDEVICE_OBJECT PhysicalDeviceObject);
+VOID NTAPI DPReinitializationRoutine(IN	PDRIVER_OBJECT DriverObject,IN PVOID Context,IN ULONG Count);
+NTSTATUS NTAPI DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, _In_reads_opt_(_Inexpressible_("varies")) PVOID Context);
 
-NTSTATUS NTAPI DPDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp);
-NTSTATUS NTAPI DPDispatchPower(PDEVICE_OBJECT DeviceObject, PIRP Irp);
-NTSTATUS NTAPI DPDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber);
+NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length);
+NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length, void* bufInOut, void* bufIn);
 
-
-NTSTATUS DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, _In_reads_opt_(_Inexpressible_("varies")) PVOID Context);
-NTSTATUS DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber);
-NTSTATUS DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length);
-#endif // !_DISK_DIRVER_H
-
+#endif // !_DP_BITMAP_H
