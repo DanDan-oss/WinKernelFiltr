@@ -5,13 +5,28 @@
 #include <ntddk.h>
 #include <wdf.h>
 
+#define BITMAP_ERR_OUTOFRANGE	-1
+#define BITMAP_ERR_ALLOCMEMORY	-2
+#define BITMAP_SUCCESS			0
+#define BITMAP_BIT_SET			1
+#define BITMAP_BIT_CLEAR		2
+#define BITMAP_BIT_UNKNOW		3
+#define BITMAP_RANGE_SET		4
+#define BITMAP_RANGE_CLEAR		5
+#define BITMAP_RANGE_BLEND		6
+#define BITMAP_RANGE_SIZE		25600
+#define BITMAP_RANGE_SIZE_SMALL 256
+#define BITMAP_RANGE_SIZE_MAX	51684
+#define BITMAP_RANGE_AMOUNT		16*1024
+
+#define SPARSE_FILE_NAME L"\\??\\C:\\temp.dat"
+
 typedef  unsigned char BYTE;
 typedef  unsigned short int WORD;
 typedef  unsigned long int DWORD;
 typedef  unsigned long long int QWORD;
 typedef  unsigned char tBitmap;
-
-#define SPARSE_FILE_NAME L"\\??\\C:\\temp.dat"
+typedef BYTE* PBYTE;
 
 typedef struct _DP_BITMAP
 {
@@ -61,5 +76,6 @@ NTSTATUS NTAPI DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP I
 NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber);
 NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length);
 NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length, void* bufInOut, void* bufIn);
+
 
 #endif // !_DP_BITMAP_H

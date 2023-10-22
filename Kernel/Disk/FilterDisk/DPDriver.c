@@ -1,6 +1,9 @@
+#include <ntifs.h>
+#include <ntddvol.h>
+
 #include "DPDriver.h"
 #include "DPBitmap.h"
-#include <ntddvol.h>
+
 
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -96,6 +99,201 @@ ERROUT:
 			IoDeleteDevice(FilterDeviceObject);
 	}
 	return ntStatus;
+}
+
+VOID NTAPI DPReadWriteThread(PVOID Context)
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PDP_FILTER_DEV_EXTENSION DevExt = (PDP_FILTER_DEV_EXTENSION)Context;
+	PLIST_ENTRY pRequestList = NULL;
+	PIRP Irp = NULL;
+	PIO_STACK_LOCATION irpsp = NULL;
+	PBYTE sysBuf = NULL;
+	ULONG length = 0;
+	LARGE_INTEGER offset = { 0 };
+	PBYTE fileBuf = NULL;
+	PBYTE devBuf = NULL;
+	IO_STATUS_BLOCK iso = { 0 };
+
+
+	KeSetPriorityThread(KeGetCurrentThread(), LOW_REALTIME_PRIORITY);		// 设置线程优先级
+	for (;;)
+	{
+		//先等待请求队列同步事件，如果队列中没有irp需要处理，我们的线程就等待在这里，让出cpu时间给其它线程
+		KeWaitForSingleObject(&DevExt->RequestList, Executive, KernelMode, FALSE, NULL);
+
+		if (DevExt->ThreadTermFlag)	// 判断线程结束标志
+		{
+			PsTerminateSystemThread(STATUS_SUCCESS);
+			return;
+		}
+		while (pRequestList = ExInterlockedRemoveHeadList(&DevExt->RequestList, &DevExt->RequestLock))
+		{	// 使用自旋锁去除请求队列
+			Irp = CONTAINING_RECORD(pRequestList, IRP, Tail.Overlay.ListEntry);		//从队列的入口里找到实际的irp的地址
+			irpsp = IoGetCurrentIrpStackLocation(Irp);
+			// //获取这个irp其中包含的缓存地址，这个地址可能来自mdl，也可能就是直接的缓冲，这取决于我们当前设备的io方式是buffer还是direct方式
+			if (!Irp->MdlAddress)
+				sysBuf = (PBYTE)Irp->UserBuffer;
+			else
+				sysBuf = MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+
+			switch (irpsp->MajorFunction)
+			{
+			case IRP_MJ_READ:	//如果是读的irp请求，我们在irp stack中取得相应的参数作为offset和length
+				offset = irpsp->Parameters.Read.ByteOffset;
+				length = irpsp->Parameters.Read.Length;
+				break;
+			case IRP_MJ_WRITE:	//如果是写的irp请求，我们在irp stack中取得相应的参数作为offset和length
+				offset = irpsp->Parameters.Write.ByteOffset;
+				length = irpsp->Parameters.Write.Length;
+				break;
+			default:			//除此之外，offset和length都是0
+				offset.QuadPart = 0;
+				length = 0;
+				break;
+			}
+
+			if (!sysBuf || !length)
+				goto ERRNEXT;
+
+			// 下面是转储的过程了
+			if (irpsp->MajorFunction == IRP_MJ_READ)
+			{	// 读过程
+				long testResult = DPBitmapTest(DevExt->Bitmap, offset, length);
+				switch (testResult)
+				{
+				case BITMAP_RANGE_CLEAR:	// 读取的操作全部是读取未转储的空间，也就是真正的磁盘上的内容，我们直接发给下层设备去处理
+					goto ERRNEXT;
+				case BITMAP_RANGE_SET:		// 读取的操作全部是读取已经转储的空间，也就是缓冲文件上的内容，我们从文件中读取出来，然后直接完成这个irp
+					fileBuf = (PBYTE)ExAllocatePoolWithTag(NonPagedPool, length, 'xypZ');
+					if (!fileBuf)
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					RtlZeroMemory(fileBuf, length);
+					ntStatus = ZwReadFile(DevExt->TempFile, NULL, NULL, NULL, &iso, fileBuf, length, &offset, NULL);
+					if (!NT_SUCCESS(ntStatus))
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					Irp->IoStatus.Information = length;
+					RtlCopyMemory(sysBuf, fileBuf, Irp->IoStatus.Information);
+					goto ERRCMPLT;
+					break;
+				case BITMAP_RANGE_BLEND:	// 读取的操作是混合的，我们也需要从下层设备中读出，同时从文件中读出，然后混合并返回
+					fileBuf = (PBYTE)ExAllocatePoolWithTag(NonPagedPool, length, 'xypZ');
+					if (!fileBuf)
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					RtlZeroMemory(fileBuf, length);
+					devBuf = ExAllocatePoolWithTag(NonPagedPool, length, 'xypZ');
+					if (devBuf)
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					RtlZeroMemory(devBuf, length);
+					ntStatus = ZwReadFile(DevExt->TempFile, NULL, NULL, NULL, &iso, fileBuf, length, &offset, NULL);
+					if (!NT_SUCCESS(ntStatus))
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					//把这个irp发给下层设备去获取需要从设备上读取的信息存储到devBuf中
+					ntStatus = DPforwardIrpSync(DevExt->LowerDeviceObject, Irp);
+					if (!NT_SUCCESS(ntStatus))
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					memcpy(devBuf, sysBuf, Irp->IoStatus.Information);
+					// 从文件获取到的数据和从设备获取到的数据根据相应的bitmap值来进行合并，合并的结果放在devBuf中
+					ntStatus = DPBitmapGet(DevExt->Bitmap, offset, length, devBuf, fileBuf);
+					if (!NT_SUCCESS(ntStatus))
+					{
+						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+						Irp->IoStatus.Information = 0;
+						goto ERRERR;
+					}
+					// 合并完的数据存入系统缓冲并完成irp
+					memcpy(sysBuf, devBuf, Irp->IoStatus.Information);
+					goto ERRCMPLT;
+					break;
+				default:
+					ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+					goto ERRERR;
+					break;
+				}
+			}
+			else
+			{	// 写过程
+				ntStatus = ZwWriteFile(DevExt->TempFile, NULL, NULL, NULL, &iso, sysBuf, length, &offset,  NULL);
+				if (!NT_SUCCESS(ntStatus))
+				{
+					ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+					goto ERRERR;
+				}
+				ntStatus = DPBitmapSet(DevExt->Bitmap, offset, length);
+				if (!NT_SUCCESS(ntStatus))
+				{
+					ntStatus = STATUS_INSUFFICIENT_RESOURCES;
+					goto ERRERR;
+				}
+				goto ERRCMPLT;
+			}
+ERRERR:
+			if (fileBuf)
+			{
+				ExFreePool(fileBuf);
+				fileBuf = NULL;
+			}
+			if (devBuf)
+			{
+				ExFreePool(devBuf);
+				devBuf = NULL;
+			}
+			DPCompleteRequest(Irp, ntStatus, IO_NO_INCREMENT);
+			continue;
+
+ERRNEXT:
+			if (fileBuf)
+			{
+				ExFreePool(fileBuf);
+				fileBuf = NULL;
+			}
+			if (devBuf)
+			{
+				ExFreePool(devBuf);
+				devBuf = NULL;
+			}
+			DPSendToNextDriver(DevExt->LowerDeviceObject, Irp);
+			continue;
+
+ERRCMPLT:
+			if (fileBuf)
+			{
+				ExFreePool(fileBuf);
+				fileBuf = NULL;
+			}
+			if (devBuf)
+			{
+				ExFreePool(devBuf);
+				devBuf = NULL;
+			}
+			DPCompleteRequest(Irp, STATUS_SUCCESS, IO_DISK_INCREMENT);
+			continue;
+		}
+	}
 }
 
 NTSTATUS NTAPI DPDispatchPower(PDEVICE_OBJECT DeviceObject, PIRP Irp)

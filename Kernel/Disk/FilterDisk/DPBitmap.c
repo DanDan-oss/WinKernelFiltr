@@ -1,5 +1,5 @@
-#include "DPBitmap.h"
 #include <ntifs.h>
+#include "DPBitmap.h"
 
 PDP_FILTER_DEV_EXTENSION gProtectDevExt = NULL;
 static tBitmap bitmapMask[8] = { 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80 };	//bitmapµÄÎ»ÑÚÂë
@@ -292,3 +292,4 @@ NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 	}
 	return ntStatus;
 }
+
