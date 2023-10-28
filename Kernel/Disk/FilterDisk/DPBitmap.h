@@ -21,12 +21,18 @@
 
 #define SPARSE_FILE_NAME L"\\??\\C:\\temp.dat"
 
-typedef  unsigned char BYTE;
-typedef  unsigned short int WORD;
-typedef  unsigned long int DWORD;
-typedef  unsigned long long int QWORD;
-typedef  unsigned char tBitmap;
+typedef  unsigned __int8 BYTE;
+typedef  unsigned __int16 WORD;
+typedef  unsigned __int32 DWORD;
+typedef  unsigned __int64 QWORD;
+
+
 typedef BYTE* PBYTE;
+typedef WORD* PWORD;
+typedef DWORD* PDWORD;
+typedef QWORD* PQWORD;
+
+typedef  unsigned char tBitmap;
 
 typedef struct _DP_BITMAP
 {
@@ -72,10 +78,16 @@ typedef struct _VOLUME_ONLINE_CONTEXT
 
 VOID NTAPI DPReinitializationRoutine(IN	PDRIVER_OBJECT DriverObject,IN PVOID Context,IN ULONG Count);
 NTSTATUS NTAPI DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, _In_reads_opt_(_Inexpressible_("varies")) PVOID Context);
+NTSTATUS NTAPI DPQueryVolumeInformation(PDEVICE_OBJECT DeviceObject, PLARGE_INTEGER TotalSize, PDWORD ClusterSize, PDWORD SectorSize);
+NTSTATUS NTAPI DPQueryVolumeInformationCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
 
-NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber);
-NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length);
-NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length, void* bufInOut, void* bufIn);
+PVOID DPBitmapAlloc(DWORD poolType, DWORD length);
+VOID NTAPI DPBitmapFree(DP_BITMAP* bitmap);
 
+NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, DWORD sectorSize, DWORD byteSize, DWORD regionSize, DWORD regionNumber);
+NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, DWORD length);
+NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, DWORD length, PVOID bufInOut, PVOID bufIn);
+
+long DPBitmapTest(DP_BITMAP* bitmap, LARGE_INTEGER offset, ULONG length);
 
 #endif // !_DP_BITMAP_H

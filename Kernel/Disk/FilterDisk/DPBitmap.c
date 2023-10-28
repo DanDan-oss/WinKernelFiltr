@@ -1,10 +1,15 @@
 #include <ntifs.h>
 #include "DPBitmap.h"
 
+#define _FileSystemNameLength	64
+#define FAT16_SIG_OFFSET	54			//定义FAT16文件系统签名的偏移量
+#define FAT32_SIG_OFFSET	82			//定义FAT32文件系统签名的偏移量
+#define NTFS_SIG_OFFSET		3			//定义NTFS文件系统签名的偏移量
+
 PDP_FILTER_DEV_EXTENSION gProtectDevExt = NULL;
 static tBitmap bitmapMask[8] = { 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80 };	//bitmap的位掩码
 
-NTSTATUS NTAPI DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context)
+NTSTATUS NTAPI DPVolumeOnlineCompleteRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, _In_reads_opt_(_Inexpressible_("varies")) PVOID Context)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	UNICODE_STRING DosName = { 0 };		// 卷设备的dos名, C、D
@@ -52,6 +57,46 @@ ERROUT:
 	return ntStatus;
 }
 
+NTSTATUS NTAPI DPQueryVolumeInformationCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context)
+{
+	UNREFERENCED_PARAMETER(Irp);
+	UNREFERENCED_PARAMETER(DeviceObject);
+	KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
+	return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+PVOID DPBitmapAlloc(DWORD poolType, DWORD length)
+{
+	switch (poolType)
+	{
+	case 0:
+		return ExAllocatePoolWithTag(NonPagedPool, length, 'mbpZ');
+	case 1:
+		return ExAllocatePoolWithTag(PagedPool, length, 'mbpZ');
+	default:
+		break;
+	}
+	return NULL;
+}
+
+VOID NTAPI DPBitmapFree(DP_BITMAP* bitmap)
+{
+	if (bitmap)
+	{
+		if (bitmap->BitMap)
+		{
+			for (int i = 0; i < bitmap->regionNumber; ++i)
+				if (*(bitmap->BitMap + i))
+					ExFreePool(*(bitmap->BitMap + i));
+			ExFreePool(bitmap->BitMap);
+			bitmap->BitMap = NULL;
+		}
+		ExFreePool(bitmap);
+		bitmap = NULL;
+	}
+	return;
+}
+
 VOID NTAPI DPReinitializationRoutine(IN	PDRIVER_OBJECT DriverObject, IN PVOID Context, IN ULONG Count)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
@@ -88,7 +133,7 @@ ERROUT:
 	return;
 }
 
-NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsigned long byteSize, unsigned long regionSize, unsigned long regionNumber)
+NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, DWORD sectorSize, DWORD byteSize, DWORD regionSize, DWORD regionNumber)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	DP_BITMAP* myBitmap = NULL;
@@ -100,7 +145,7 @@ NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsign
 	{
 		// 分配bitmap结构内存,并初始化赋值
 		myBitmap = (DP_BITMAP*)DPBitmapAlloc(0, sizeof(DP_BITMAP));
-		if (NULL == myBitmap)
+		if (!myBitmap)
 		{
 			ntStatus = STATUS_INSUFFICIENT_RESOURCES;
 			__leave;
@@ -115,7 +160,7 @@ NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsign
 
 		// 分配出regionNumber个指向region的指针. 指针数组
 		myBitmap->BitMap = (tBitmap**)DPBitmapAlloc(0, sizeof(tBitmap*) * regionNumber);
-		if (NULL == myBitmap->BitMap)
+		if (!myBitmap->BitMap)
 		{
 			ntStatus = STATUS_INSUFFICIENT_RESOURCES;
 			__leave;
@@ -137,13 +182,13 @@ NTSTATUS NTAPI DPBitmapInit(DP_BITMAP** bitmap, unsigned long sectorSize, unsign
 	return ntStatus;
 }
 
-NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length)
+NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, ULONG length)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
-	DWORD bitPos = 0;
-	DWORD regionBegin = 0, regionEnd = 0;
-	DWORD regionOffsetBegin = 0, regionOffsetEnd = 0;
-	DWORD byteOffsetBegin = 0, byteOffsetEnd = 0;
+	ULONG bitPos = 0;
+	ULONG regionBegin = 0, regionEnd = 0;
+	ULONG regionOffsetBegin = 0, regionOffsetEnd = 0;
+	ULONG byteOffsetBegin = 0, byteOffsetEnd = 0;
 	LARGE_INTEGER setBegin = { 0 }, setEnd = { 0 };
 	QWORD index = 0;
 	__try
@@ -161,8 +206,8 @@ NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 		}
 
 		// 根据要设置的偏移量和长度来计算需要使用哪些region, 如果需要就分配它们指向的内存空间
-		regionBegin = (DWORD)(offset.QuadPart / (QWORD)bitmap->regionReferSize);
-		regionEnd = (DWORD)((offset.QuadPart + (QWORD)length) / (QWORD)bitmap->regionReferSize);
+		regionBegin = (ULONG)(offset.QuadPart / (QWORD)bitmap->regionReferSize);
+		regionEnd = (ULONG)((offset.QuadPart + (QWORD)length) / (QWORD)bitmap->regionReferSize);
 		for (index = 0; index < regionEnd; ++index)
 			if (NULL == *(bitmap->BitMap + index))
 			{
@@ -179,10 +224,10 @@ NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 			}
 
 		// 开始设置bitmap， 需要将要设置的区域安装字节对齐(这样可以按字节设置而不需要按位设置), 对于没有字节对齐的区域手动设置
-		for (QWORD index = offset.QuadPart; index < offset.QuadPart + (QWORD)length; index += bitmap->sectorSize)
+		for (index = offset.QuadPart; index < offset.QuadPart + (QWORD)length; index += bitmap->sectorSize)
 		{
-			regionBegin = (DWORD)(index / (QWORD)bitmap->regionReferSize);
-			regionOffsetBegin = (DWORD)(index % (QWORD)bitmap->regionReferSize);
+			regionBegin = (ULONG)(index / (QWORD)bitmap->regionReferSize);
+			regionOffsetBegin = (ULONG)(index % (QWORD)bitmap->regionReferSize);
 			byteOffsetBegin = regionOffsetBegin / bitmap->byteSize % bitmap->sectorSize;
 			bitPos = (byteOffsetBegin / bitmap->sectorSize) % bitmap->byteSize;
 			if (!bitPos)
@@ -199,8 +244,8 @@ NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 		}
 		for (index = offset.QuadPart + (QWORD)length - bitmap->sectorSize; index >= offset.QuadPart; index -= bitmap->sectorSize)
 		{
-			regionBegin = (DWORD)(index / bitmap->regionReferSize);
-			regionOffsetBegin = (DWORD)(index % (QWORD)bitmap->regionReferSize);
+			regionBegin = (ULONG)(index / bitmap->regionReferSize);
+			regionOffsetBegin = (ULONG)(index % (QWORD)bitmap->regionReferSize);
 			byteOffsetBegin = regionOffsetBegin / bitmap->byteSize / bitmap->sectorSize;
 			bitPos = (regionOffsetBegin / bitmap->sectorSize) % bitmap->byteSize;
 			if (7 == bitPos)
@@ -215,15 +260,15 @@ NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 			ntStatus = STATUS_SUCCESS;
 			__leave;
 		}
-		regionEnd = (DWORD)(setEnd.QuadPart / (QWORD)bitmap->regionReferSize);
+		regionEnd = (ULONG)(setEnd.QuadPart / (QWORD)bitmap->regionReferSize);
 		for (index = setBegin.QuadPart; index <= setEnd.QuadPart; )
 		{
-			regionBegin = (DWORD)(index / (QWORD)bitmap->regionReferSize);
-			regionOffsetBegin = (DWORD)(index % (QWORD)bitmap->regionReferSize);
+			regionBegin = (ULONG)(index / (QWORD)bitmap->regionReferSize);
+			regionOffsetBegin = (ULONG)(index % (QWORD)bitmap->regionReferSize);
 			byteOffsetBegin = regionOffsetBegin / bitmap->byteSize / bitmap->sectorSize;
 			if (regionBegin == regionEnd)
 			{	//如果我们设置的区域没有跨两个region，只需要使用memset去做按byte的设置然后跳出即可
-				regionOffsetEnd = (DWORD)(setEnd.QuadPart % (QWORD)bitmap->regionReferSize);
+				regionOffsetEnd = (ULONG)(setEnd.QuadPart % (QWORD)bitmap->regionReferSize);
 				byteOffsetEnd = regionOffsetEnd / bitmap->byteSize / bitmap->sectorSize;
 				memset(*(bitmap->BitMap + regionBegin) + byteOffsetBegin, 0xff, byteOffsetEnd - byteOffsetBegin + 1);
 				break;
@@ -250,13 +295,13 @@ NTSTATUS NTAPI DPBitmapSet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 	return ntStatus;
 }
 
-NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned long length, void* bufInOut, void* bufIn)
+NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, ULONG length, PVOID bufInOut, PVOID bufIn)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
-	DWORD bitPos = 0;
-	DWORD regionBegin = 0;
-	DWORD regionOffsetBegin = 0;
-	DWORD byteOffsetBegin = 0;
+	ULONG bitPos = 0;
+	ULONG regionBegin = 0;
+	ULONG regionOffsetBegin = 0;
+	ULONG byteOffsetBegin = 0;
 	QWORD index = 0;
 
 	__try
@@ -276,11 +321,11 @@ NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 		//遍历需要获取的位图范围，如果出现了位被设置为1，就需要用bufIn参数中指向的相应位置的数据拷贝到bufInOut中
 		for (index = 0; index < length; index += bitmap->sectorSize)
 		{
-			regionBegin = (DWORD)((offset.QuadPart + (QWORD)index) / (QWORD)bitmap->regionReferSize);
-			regionOffsetBegin = (DWORD)((offset.QuadPart + (QWORD)index) % (QWORD)bitmap->regionReferSize);
+			regionBegin = (ULONG)((offset.QuadPart + (QWORD)index) / (QWORD)bitmap->regionReferSize);
+			regionOffsetBegin = (ULONG)((offset.QuadPart + (QWORD)index) % (QWORD)bitmap->regionReferSize);
 			byteOffsetBegin = regionOffsetBegin / bitmap->byteSize / bitmap->sectorSize;
 			bitPos = (regionOffsetBegin / bitmap->sectorSize) % bitmap->byteSize;
-			if (NULL != *(bitmap->BitMap + regionBegin) && (*(*(bitmap->BitMap + regionBegin) + byteOffsetBegin) & bitmapMask[bitPos]))
+			if (*(bitmap->BitMap + regionBegin) && (*(*(bitmap->BitMap + regionBegin) + byteOffsetBegin) & bitmapMask[bitPos]))
 				memcpy((tBitmap*)bufInOut + index, (tBitmap*)bufIn + index, bitmap->sectorSize);
 
 		}
@@ -293,3 +338,57 @@ NTSTATUS NTAPI DPBitmapGet(DP_BITMAP* bitmap, LARGE_INTEGER offset, unsigned lon
 	return ntStatus;
 }
 
+long DPBitmapTest(DP_BITMAP* bitmap, LARGE_INTEGER offset, ULONG length)
+{
+	CHAR flag = 0;
+	QWORD index = 0;
+	ULONG bitPos = 0;
+	ULONG regionBegin = 0;
+	ULONG regionOffsetBegin = 0;
+	ULONG byteOffsetBegin = 0;
+	LONG ret = BITMAP_BIT_UNKNOW;
+	__try
+	{
+		if (offset.QuadPart <0 || offset.QuadPart + length >bitmap->bitmapReferSize || !bitmap)
+		{
+			ret = BITMAP_BIT_UNKNOW;
+			__leave;
+		}
+
+		for (index = 0; index < length; length += bitmap->sectorSize)
+		{
+			regionBegin = (ULONG)((offset.QuadPart + (QWORD)index) / (QWORD)bitmap->regionReferSize);
+			regionOffsetBegin = (ULONG)((offset.QuadPart + (QWORD)index) % (QWORD)bitmap->regionReferSize);
+			byteOffsetBegin = regionOffsetBegin / bitmap->byteSize / bitmap->sectorSize;
+			bitPos = (regionOffsetBegin / bitmap->sectorSize) % bitmap->byteSize;
+			if (*(bitmap->BitMap + regionBegin) && *(*(bitmap->BitMap + regionBegin) + byteOffsetBegin) & bitmapMask[bitPos])
+				flag |= 0x2;
+			else
+				flag |= 0x1;
+
+			if (0x3 == flag)
+				break;
+		}
+
+		switch (flag)
+		{
+		case 0x1:
+			ret = BITMAP_RANGE_CLEAR;
+			break;
+		case 0x2:
+			ret = BITMAP_RANGE_SET;
+			break;
+		case 0x3:
+			ret = BITMAP_RANGE_BLEND;
+			break;
+		default:
+			break;
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		ret = BITMAP_BIT_UNKNOW;
+	}
+
+	return ret;
+}

@@ -12,17 +12,17 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	if (DriverObject)
 	{
 		for (int i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i)
-			DriverObject->MajorFunction[i] = DPDospatchAny;
+			DriverObject->MajorFunction[i] = DPDispatchAny;
 		DriverObject->MajorFunction[IRP_MJ_POWER] = DPDispatchPower;
 		DriverObject->MajorFunction[IRP_MJ_PNP] = DPDispatchPnp;
 		DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DPDispatchDeviceControl;
-		DriverObject->MajorFunction[IRP_MJ_READ] = DPDispatchRead;
-		DriverObject->MajorFunction[IRP_MJ_WRITE] = DPDispatchWrite;
+		DriverObject->MajorFunction[IRP_MJ_READ] = DPDispatchReadWrite;
+		DriverObject->MajorFunction[IRP_MJ_WRITE] = DPDispatchReadWrite;
 		DriverObject->DriverExtension->AddDevice = DPAddDevice;
 		DriverObject->DriverUnload = DpUnload;
 
 		// 注册boot驱动结束回调函数
-		IoRegisterBootDriverReinitialization(DriverObject, DPReinitializationRoutine);
+		IoRegisterBootDriverReinitialization(DriverObject, DPReinitializationRoutine, NULL);
 
 		KdPrint(("[dbg][%ws]Driver Object Address:%p, Current IRQL=0x%u\n", __FUNCTIONW__, DriverObject, KeGetCurrentIrql()));
 	}
@@ -33,7 +33,9 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 
 VOID NTAPI DpUnload(PDRIVER_OBJECT DriverObject)
 {
-	
+	//这个驱动将会工作到系统关机,不用在驱动卸载的时候做任何清理动作
+	UNREFERENCED_PARAMETER(DriverObject);
+	return;
 }
 
 NTSTATUS NTAPI DPAddDevice(PDRIVER_OBJECT DriverObject, PDEVICE_OBJECT PhysicalDeviceObject)
@@ -127,7 +129,7 @@ VOID NTAPI DPReadWriteThread(PVOID Context)
 			PsTerminateSystemThread(STATUS_SUCCESS);
 			return;
 		}
-		while (pRequestList = ExInterlockedRemoveHeadList(&DevExt->RequestList, &DevExt->RequestLock))
+		while ((pRequestList = ExInterlockedRemoveHeadList(&DevExt->RequestList, &DevExt->RequestLock)))
 		{	// 使用自旋锁去除请求队列
 			Irp = CONTAINING_RECORD(pRequestList, IRP, Tail.Overlay.ListEntry);		//从队列的入口里找到实际的irp的地址
 			irpsp = IoGetCurrentIrpStackLocation(Irp);
@@ -209,7 +211,7 @@ VOID NTAPI DPReadWriteThread(PVOID Context)
 						goto ERRERR;
 					}
 					//把这个irp发给下层设备去获取需要从设备上读取的信息存储到devBuf中
-					ntStatus = DPforwardIrpSync(DevExt->LowerDeviceObject, Irp);
+					ntStatus = DPForwardIrpSync(DevExt->LowerDeviceObject, Irp);
 					if (!NT_SUCCESS(ntStatus))
 					{
 						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
@@ -296,6 +298,54 @@ ERRCMPLT:
 	}
 }
 
+NTSTATUS NTAPI DPSendToNextDriver(PDEVICE_OBJECT TargetDeviceObject, PIRP Irp)
+{
+	IoSkipCurrentIrpStackLocation(Irp);
+	return IoCallDriver(TargetDeviceObject, Irp);
+}
+
+NTSTATUS NTAPI DPForwardIrpSync(PDEVICE_OBJECT TargetDeviceObject, PIRP Irp)
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	KEVENT event = { 0 };
+
+	KeInitializeEvent(&event, NotificationEvent, FALSE);
+	IoCopyCurrentIrpStackLocationToNext(Irp);
+
+	// 设置完成函数，并且将等待事件设置为上面初始化的事件，如果完成函数被调用，这个事件将会被设置，同时也由此获知这个irp处理完成了
+	IoSetCompletionRoutine(Irp, DPIrpCompletionRoutine, &event, TRUE, TRUE, TRUE);
+	ntStatus = IoCallDriver(TargetDeviceObject, Irp);
+	if (STATUS_PENDING == ntStatus)
+	{
+		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+		ntStatus = Irp->IoStatus.Status;
+	}
+	return ntStatus;
+}
+
+NTSTATUS NTAPI DPIrpCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	PKEVENT Event = (PKEVENT)Context;
+
+	KeSetEvent(Event, IO_NO_INCREMENT, FALSE);
+	return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+NTSTATUS NTAPI DPCompleteRequest(PIRP Irp, NTSTATUS Status, CCHAR Priority)
+{
+	Irp->IoStatus.Status = Status;
+	IoCompleteRequest(Irp, Priority);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS DPDispatchAny(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	PDP_FILTER_DEV_EXTENSION DevExt = DeviceObject->DeviceExtension;
+	return DPSendToNextDriver(DevExt->LowerDeviceObject, Irp);
+}
+
 NTSTATUS NTAPI DPDispatchPower(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
 	PDP_FILTER_DEV_EXTENSION DevExt = DeviceObject->DeviceExtension;
@@ -306,7 +356,7 @@ NTSTATUS NTAPI DPDispatchPower(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	IoSkipCurrentIrpStackLocation(Irp);
 	return PoCallDriver(DevExt->LowerDeviceObject, Irp);
 #else
-	return DPSendToNextDriver(DevExt->LowerDeviceObject);
+	return DPSendToNextDriver(DevExt->LowerDeviceObject, Irp);
 #endif // (NTDDI_VERSION <NTDDI_VISTA)
 }
 
@@ -354,7 +404,7 @@ NTSTATUS NTAPI DPDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 				setPagable = TRUE;
 			}
 		}
-		ntStatus = DPforwardIrpSync(DevExt->LowerDeviceObject, Irp);
+		ntStatus = DPForwardIrpSync(DevExt->LowerDeviceObject, Irp);
 		if (NT_SUCCESS(ntStatus))
 		{	// 下发给下层设备的请求成功,说明下层设备支持这个操作
 			IoAdjustPagingPathCount(&DevExt->PagingPathCount, irpsp->Parameters.UsageNotification.InPath);
@@ -410,7 +460,6 @@ NTSTATUS NTAPI DPDispatchDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
 NTSTATUS NTAPI DPDispatchReadWrite(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PDP_FILTER_DEV_EXTENSION DevExt = (PDP_FILTER_DEV_EXTENSION)DeviceObject->DeviceExtension;
 
 	if (DevExt->Protect)
