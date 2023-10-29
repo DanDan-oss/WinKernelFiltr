@@ -42,6 +42,7 @@
     <Configuration>Debug</Configuration>
     <Platform Condition="'$(Platform)' == ''">Win32</Platform>
     <RootNamespace>FilterDisk</RootNamespace>
+    <ProjectName>DBFilter</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -147,11 +148,12 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Driver.c" />
-    <ClCompile Include="FilterDP.c" />
+    <ClInclude Include="DPBitmap.h" />
+    <ClInclude Include="DPDriver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="FilterDP.h" />
+    <ClCompile Include="DPBitmap.c" />
+    <ClCompile Include="DPDriver.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
