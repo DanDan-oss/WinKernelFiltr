@@ -129,7 +129,7 @@ VOID NTAPI DPReadWriteThread(PVOID Context)
 			PsTerminateSystemThread(STATUS_SUCCESS);
 			return;
 		}
-		while ((pRequestList = ExInterlockedRemoveHeadList(&DevExt->RequestList, &DevExt->RequestLock)))
+		while (0 < (pRequestList = ExInterlockedRemoveHeadList(&DevExt->RequestList, &DevExt->RequestLock)))
 		{	// 使用自旋锁去除请求队列
 			Irp = CONTAINING_RECORD(pRequestList, IRP, Tail.Overlay.ListEntry);		//从队列的入口里找到实际的irp的地址
 			irpsp = IoGetCurrentIrpStackLocation(Irp);
@@ -196,7 +196,7 @@ VOID NTAPI DPReadWriteThread(PVOID Context)
 					}
 					RtlZeroMemory(fileBuf, length);
 					devBuf = ExAllocatePoolWithTag(NonPagedPool, length, 'xypZ');
-					if (devBuf)
+					if (!devBuf)
 					{
 						ntStatus = STATUS_INSUFFICIENT_RESOURCES;
 						Irp->IoStatus.Information = 0;
@@ -369,13 +369,13 @@ NTSTATUS NTAPI DPDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	switch (irpsp->MinorFunction)
 	{
 	case IRP_MN_REMOVE_DEVICE: {	// PnP管理器发送的移除设备IRP
-		if (TRUE != DevExt->ThreadTermFlag && NULL != DevExt->ThreadHandle)
+		if (TRUE != DevExt->ThreadTermFlag && DevExt->ThreadHandle)
 		{ // 如果线程还在运行,设置线程停止运行标志,并发送事件信息
 			DevExt->ThreadTermFlag = TRUE;
 			KeSetEvent(&DevExt->RequestEvent, (KPRIORITY)0, FALSE);
 			KeWaitForSingleObject(DevExt->ThreadHandle, Executive, KernelMode, FALSE, NULL);
+			ObDereferenceObject(DevExt->ThreadHandle);
 		}
-		ObDereferenceObject(DevExt->ThreadHandle);
 		if (DevExt->Bitmap)
 			DPBitmapFree(DevExt->Bitmap);
 		if (DevExt->LowerDeviceObject)
