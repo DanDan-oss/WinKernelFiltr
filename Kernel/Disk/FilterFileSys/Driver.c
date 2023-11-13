@@ -1,14 +1,17 @@
 #include "Driver.h"
+#include "FastIo.h"
 
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
+PDRIVER_OBJECT g_SFilterDriverObject = NULL;
 
 VOID NTAPI DriverUnload(PDRIVER_OBJECT DriverObject)
 {
-	
+	UNREFERENCED_PARAMETER(DriverObject);
 }
 
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
+	UNREFERENCED_PARAMETER(RegistryPath);
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PFAST_IO_DISPATCH fastIoDispatch = NULL;
 	UNICODE_STRING nameString = { 0 };
@@ -88,12 +91,16 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 
 NTSTATUS NTAPI SfCreate(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-	
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	return STATUS_SUCCESS;
 }
 
 NTSTATUS NTAPI SfCleanupClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	return STATUS_SUCCESS;
 }
 
 NTSTATUS NTAPI SfPassThrough(PDEVICE_OBJECT DeviceObject, PIRP Irp)
@@ -105,44 +112,14 @@ NTSTATUS NTAPI SfPassThrough(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
 	// 不做处理,直接下发
 	IoSkipCurrentIrpStackLocation(Irp);
-	return IoCallDriver((PSFILTER_DEVICE_EXTENSION)(DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
 }
 
 NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 {
-	
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	return STATUS_SUCCESS;
 }
 
 
-BOOLEAN NTAPI SfFastIoCheckIfPossible(IN PFILE_OBJECT FileObject, IN PLARGE_INTEGER FileOffset, IN ULONG Length, IN BOOLEAN Wait, \
-	IN ULONG LockKey, IN BOOLEAN CheckForReadOperation, OUT PIO_STATUS_BLOCK IoStatus, IN PDEVICE_OBJECT DeviceObject)
-/*++
-	描述:
-			此例程是用于检查的快速I/O"直通"函数,是否可以对此文件进行快速I/O
-			此函数只是调用文件系统的相应函数,或者如果文件系统未实现该函数,则返回FALSE
-	参数:
-		FileObject				- 指向要操作的文件对象的指针
-		FileOffset				- 操作的文件中的字节偏移量
-		Length					- 要执行的操作的长度
-		Wait					- 调用方是否愿意等待,无法获取适当的锁时
-		LockKey					- 为文件锁提供调用方的密钥
-		CheckForReadOperation	- 调用方是否正在检查读取（TRUE）或写入操作
-		IoStatus				- 指向一个变量的指针，用于接收IO操作状态
-		DeviceObject			- 指向此驱动程序的设备对象的指针，该设备位于该操作将发生
-	返回值:
-		根据对于该文件是否快速I/O，函数返回值为TRUE或FALSE
---*/
-{
-
-}
-
-BOOLEAN
-SfFastIoUnlockAll(
-	IN PFILE_OBJECT FileObject,
-	PEPROCESS ProcessId,
-	OUT PIO_STATUS_BLOCK IoStatus,
-	IN PDEVICE_OBJECT DeviceObject
-)
-{
-	
-}
