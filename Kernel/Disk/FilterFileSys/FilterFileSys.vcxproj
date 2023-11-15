@@ -149,10 +149,12 @@
   <ItemGroup>
     <ClCompile Include="Driver.c" />
     <ClCompile Include="FastIo.c" />
+    <ClCompile Include="SFilter.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Driver.h" />
     <ClInclude Include="FastIo.h" />
+    <ClInclude Include="SFilter.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

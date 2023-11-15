@@ -3,12 +3,12 @@
 
 #include <ntddk.h>
 
-
-// // 判断 FAST_IO_DISPATCH处理函数是否有效的宏
+// 判断 FAST_IO_DISPATCH处理函数是否有效的宏
 #define VALID_FAST_IO_DISPATCH_HANDLER(FastIoDispatchPtr, FastFuncName) \
 	(((FastIoDispatchPtr) != NULL) && \
 	(((FastIoDispatchPtr)->SizeOfFastIoDispatch) >= (FIELD_OFFSET(FAST_IO_DISPATCH, FastFuncName) + sizeof(void*))) && \
 	((FastIoDispatchPtr)->FastFuncName != NULL))
+
 
 /* 
 	快速IO分发函数

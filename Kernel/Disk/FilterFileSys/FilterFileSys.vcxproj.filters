@@ -30,12 +30,18 @@
     <ClInclude Include="FastIo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SFilter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Driver.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="FastIo.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SFilter.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

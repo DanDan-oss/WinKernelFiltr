@@ -1,5 +1,6 @@
-#include "Driver.h"
+#include "SFilter.h"
 #include "FastIo.h"
+#include "Driver.h"
 
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
@@ -51,7 +52,12 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	DriverObject->MajorFunction[IRP_MJ_CLOSE] = SfCleanupClose;
 
 
-	// 初始化控制设备的快速IO分发函数
+	/*	初始化控制设备的快速IO分发函数
+	* 不支持AcquireFileForNtCreateSection, ReleaseFileForNtCreateSection, AcquireForModWrite, ReleaseForModWrite, AcquireForCcFlush, ReleaseForCcFlush
+	* 由于历史原因,这些FastIO从未被通过NT I/O系统发送到过滤器,而是直接送到文件系统,
+	* 在Windows XP和更高版本的操作系统上可以使用系统函数"FsRtlRegisterFileSystemFilterCallbacks"截取这些回调函数
+	*/
+
 	// 这组函数的指针在drjver->FastIoDispatc中,而且这里本来是没有空间的,所以为了保存这一组指针,必须自己分配空间,快速IO分发函数表必须在非分页内存NonPagedPool
 	fastIoDispatch = ExAllocatePoolWithTag(NonPagedPool, sizeof(PFAST_IO_DISPATCH), SFLT_POOL_TAG);
 	if (!fastIoDispatch)
@@ -86,6 +92,47 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	fastIoDispatch->FastIoQueryOpen = SfFastIoQueryOpen;
 
 	DriverObject->FastIoDispatch = fastIoDispatch;
+
+
+	/* VERSION NOTE:
+	* 有6个FastIO例程绕过了文件系统筛选器将请求直接传递到基本文件系统
+	* AcquireFileForNtCreateSection, ReleaseFileForNtCreateSection, AcquireForModWrite, ReleaseForModWrite, AcquireForCcFlush, ReleaseForCcFlush
+	* 在Windows XP及更高版本中,FsFilter回调函数被引入以允许过滤器以安全地挂接这些操作(请参阅IFS工具包文档有关这些新接口如何工作的更多详细信息)
+	*/
+
+	/*  MULTIVERSION NOTE:
+	* 如果是为Windows XP及以上版本构建,则此驱动程序是为在上运行而构建的多个版本,
+	* 将进行检测用于FsFilter回调注册API的存在,如果存在,将注册这些回调.否则不会
+	*/
+#if WINVER >= 0x0501
+	FS_FILTER_CALLBACKS fsFilterCallbacks = { 0 };
+	if (NULL != gSfDynamicFunctions.RegisterFileSystemFilterCallbacks)
+	{
+		fsFilterCallbacks.SizeOfFsFilterCallbacks = sizeof(FS_FILTER_CALLBACKS);
+		fsFilterCallbacks.PreAcquireForSectionSynchronization = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostAcquireForSectionSynchronization = SfPostFsFilterPassThrough;
+		fsFilterCallbacks.PreReleaseForSectionSynchronization = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostReleaseForSectionSynchronization = SfPostFsFilterPassThrough;
+		fsFilterCallbacks.PreAcquireForCcFlush = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostAcquireForCcFlush = SfPostFsFilterPassThrough;
+		fsFilterCallbacks.PreReleaseForCcFlush = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostReleaseForCcFlush = SfPostFsFilterPassThrough;
+		fsFilterCallbacks.PreAcquireForModifiedPageWriter = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostAcquireForModifiedPageWriter = SfPostFsFilterPassThrough;
+		fsFilterCallbacks.PreReleaseForModifiedPageWriter = SfPreFsFilterPassThrough;
+		fsFilterCallbacks.PostReleaseForModifiedPageWriter = SfPostFsFilterPassThrough;
+
+		ntStatus = (gSfDynamicFunctions.RegisterFileSystemFilterCallbacks)(DriverObject, &fsFilterCallbacks);
+		if (!NT_SUCCESS(ntStatus))
+		{
+			ExFreePool(fastIoDispatch);
+			fastIoDispatch = NULL;
+			DriverObject->FastIoDispatch = NULL;
+			IoDeleteDevice(g_SFilterControlDeviceObject);
+			g_SFilterControlDeviceObject = NULL;
+		}
+	}
+#endif
 	return ntStatus;
 }
 
@@ -122,4 +169,24 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	return STATUS_SUCCESS;
 }
 
+NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, IN OUT PDEVICE_OBJECT* AttachedToDeviceObject)
+{
+	PAGED_CODE();
 
+#if WINVER >= 0x0501
+	// 当编译的期望目标操作系统版本高于6x0561时, AttachDeviceToDeviceStackSafe可以调用,比IoAttachDeviceToDeviceStack更可靠
+	if (IS_WINDOWSXP_OR_LATER())
+	{
+		ASSERT(NULL != gSfDynamicFunctions.AttachDeviceToDeviceStackSafe);
+		return (gSfDynamicFunctions.AttachDeviceToDeviceStackSafe)(SourceDevice, TargetDevice, AttachedToDeviceObject);
+	}
+	ASSERT(NULL == gSfDynamicFunctions.AttachDeviceToDeviceStackSafe);
+#endif // WINVER >= 0x0501
+
+	*AttachedToDeviceObject = TargetDevice;
+	*AttachedToDeviceObject = IoAttachDeviceToDeviceStack(SourceDevice, TargetDevice);
+	if (NULL == *AttachedToDeviceObject)
+		return STATUS_NO_SUCH_DEVICE;
+	return STATUS_SUCCESS;
+
+}
