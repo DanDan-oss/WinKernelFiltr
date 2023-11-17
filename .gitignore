@@ -9,3 +9,6 @@
 /Kernel/Disk/RamDisk/x64
 /Kernel/Disk/FilterDisk/Debug
 /Kernel/Disk/FilterDisk/x64
+/Kernel/Disk/FilterFileSys/Debug
+/Kernel/Disk/FilterFileSys/x64
+/Kernel/Disk/FilterFileSys/.vs
