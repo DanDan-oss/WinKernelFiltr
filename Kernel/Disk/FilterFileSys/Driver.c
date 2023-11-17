@@ -4,6 +4,68 @@
 
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
+ULONG SfDebug = 0;
+
+static CONST PCHAR DeviceTypeNames[] = {
+	"",
+	"BEEP",
+	"CD_ROM",
+	"CD_ROM_FILE_SYSTEM",
+	"CONTROLLER",
+	"DATALINK",
+	"DFS",
+	"DISK",
+	"DISK_FILE_SYSTEM",
+	"FILE_SYSTEM",
+	"INPORT_PORT",
+	"KEYBOARD",
+	"MAILSLOT",
+	"MIDI_IN",
+	"MIDI_OUT",
+	"MOUSE",
+	"MULTI_UNC_PROVIDER",
+	"NAMED_PIPE",
+	"NETWORK",
+	"NETWORK_BROWSER",
+	"NETWORK_FILE_SYSTEM",
+	"NULL",
+	"PARALLEL_PORT",
+	"PHYSICAL_NETCARD",
+	"PRINTER",
+	"SCANNER",
+	"SERIAL_MOUSE_PORT",
+	"SERIAL_PORT",
+	"SCREEN",
+	"SOUND",
+	"STREAMS",
+	"TAPE",
+	"TAPE_FILE_SYSTEM",
+	"TRANSPORT",
+	"UNKNOWN",
+	"VIDEO",
+	"VIRTUAL_DISK",
+	"WAVE_IN",
+	"WAVE_OUT",
+	"8042_PORT",
+	"NETWORK_REDIRECTOR",
+	"BATTERY",
+	"BUS_EXTENDER",
+	"MODEM",
+	"VDM",
+	"MASS_STORAGE",
+	"SMB",
+	"KS",
+	"CHANGER",
+	"SMARTCARD",
+	"ACPI",
+	"DVD",
+	"FULLSCREEN_VIDEO",
+	"DFS_FILE_SYSTEM",
+	"DFS_VOLUME",
+	"SERENUM",
+	"TERMSRV",
+	"KSEC"
+};
 
 VOID NTAPI DriverUnload(PDRIVER_OBJECT DriverObject)
 {
@@ -11,12 +73,21 @@ VOID NTAPI DriverUnload(PDRIVER_OBJECT DriverObject)
 }
 
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
+/*  TODO:
+*	第一步: 生成控制设备,并且给控制设备指定名称
+*   第二步: 设置普通分发函数
+*   第三步: 设置快速IO分发函数
+*   第四步: 编写文件系统变动回调函数,并绑定刚激活的文件系统控制设备
+*   第五步: 使用IoRegisterFsRegistrationChange函数注册系统变动回调函数
+*/
 {
 	UNREFERENCED_PARAMETER(RegistryPath);
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PFAST_IO_DISPATCH fastIoDispatch = NULL;
 	UNICODE_STRING nameString = { 0 };
-	
+
+	PDEVICE_OBJECT rawDeviceObject = NULL;
+	PFILE_OBJECT fileObject = NULL;
 
 	RtlInitUnicodeString(&nameString, L"\\FileSystem\\Filters\\SFilter");
 	ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_DISK_FILE_SYSTEM, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
@@ -27,7 +98,7 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 		// 如果生成路径 \\FileSystem\\Filters\\SFilter 未找到说明可能是路径原因生成失败
 		if (STATUS_OBJECT_PATH_NOT_FOUND != ntStatus)
 		{
-			KdPrint(("[dbg][%ws] SFilter: Error creating control device object \"%wZ\", status =%08x\n ", __FUNCTIONW__, &nameString, ntStatus));
+			KdPrint(("[dbg]![%ws]: Error creating control device object \"%wZ\", status =%08x\n ", __FUNCTIONW__, &nameString, ntStatus));
 			return ntStatus;
 		}
 
@@ -36,7 +107,7 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 		ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_DISK_FILE_SYSTEM, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
 		if (!NT_SUCCESS(ntStatus) || NULL == g_SFilterControlDeviceObject)
 		{
-			KdPrint(("[dbg][%ws] SFilter: Error creating control device object \"%wZ\", status =%08x\n ", __FUNCTIONW__, &nameString, ntStatus));
+			KdPrint(("[dbg]![%ws]: Error creating control device object \"%wZ\", status =%08x\n ", __FUNCTIONW__, &nameString, ntStatus));
 			return ntStatus;
 		}
 	}
@@ -133,6 +204,51 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 		}
 	}
 #endif
+
+	// 注册IoRegisterFsRegistrationChange的回调函数"SfFsNotification",只有在文件系统被激活或者注销时才会调用
+	/* 版本说明:
+	* 在Windows XP及更高版本上，这也将枚举所有现有文件系统(RAW文件系统除外). 在Windows 2000上枚举在此筛选器之前加载的文件系统加载
+	*/
+	ntStatus = IoRegisterFsRegistrationChange(DriverObject, SfFsNotification);
+	if (!NT_SUCCESS(ntStatus))
+	{
+		//  失败后前面分配的FastIO分发函数就没用了,直接释放掉
+		KdPrint(("[dbg]![%ws]: Error registering FS change notification, status =%08x\n ", __FUNCTIONW__, ntStatus));
+		if (fastIoDispatch)
+		{
+			ExFreePool(fastIoDispatch);
+			fastIoDispatch = NULL;
+			DriverObject->FastIoDispatch = NULL;
+		}
+		if (g_SFilterControlDeviceObject)
+		{
+			IoDeleteDevice(g_SFilterControlDeviceObject);
+			g_SFilterControlDeviceObject = NULL;
+		}
+		return ntStatus;
+	}
+
+	// 尝试附加到RAW文件系统设备对象,因为它们不是由IoRegisterFsRegistrationChange枚举的
+	RtlInitUnicodeString(&nameString, L"\\Device\\RawDisk");
+	ntStatus = IoGetDeviceObjectPointer(&nameString, FILE_READ_ATTRIBUTES, &fileObject, &rawDeviceObject);
+	if (NT_SUCCESS(ntStatus))
+	{
+		SfFsNotification(rawDeviceObject, TRUE);
+		ObDereferenceObject(fileObject);
+	}
+
+	// 连接到RawCdRom设备
+	RtlInitUnicodeString(&nameString, L"\\Device\\RawCdRom");
+	ntStatus = IoGetDeviceObjectPointer(&nameString, FILE_READ_ATTRIBUTES, &fileObject, &rawDeviceObject);
+	if (NT_SUCCESS(ntStatus))
+	{
+		SfFsNotification(rawDeviceObject, TRUE);
+		ObDereferenceObject(fileObject);
+	}
+
+	// 初始化完成,清楚控制设备对象上的初始化标志
+	if(g_SFilterControlDeviceObject)
+		ClearFlag(g_SFilterControlDeviceObject->Flags, DO_DEVICE_INITIALIZING);
 	return ntStatus;
 }
 
@@ -169,6 +285,52 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	return STATUS_SUCCESS;
 }
 
+VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive)
+{
+	UNICODE_STRING name = { 0 };
+	WCHAR nameBuffer[MAX_DEVNAME_LENGTH] = { 0 };
+	PAGED_CODE();
+
+	RtlInitEmptyUnicodeString(&name, nameBuffer, sizeof(nameBuffer));
+	SfGetObjectName(DeviceObject, &name);
+
+	SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]!SfFsNotification: %s %p \"%wZ\" (%s)\n", \
+		((FsActive) ? "Activating file system" : "Deactivating file system"), \
+		DeviceObject, &name, GET_DEVICE_TYPE_NAME(DeviceObject->DeviceType)) );
+
+	/*
+	*    如果是文件系统激活, 则绑定文件系统的控制设备
+	*    如果是注销, 则解除绑定
+	*/
+	if (FsActive)
+		SfAttachToFileSystemDevice(DeviceObject, &name);
+	else
+		SfDetachFromFileSystemDevice(DeviceObject);
+
+	return;
+}
+
+VOID NTAPI SfGetObjectName(IN PVOID Object, IN OUT PUNICODE_STRING Name)
+/*
+	返回指定对象的名字,如果找不到名称将返回空字符串
+	Object  - 想要获取名字的对象
+	Name  -  已使用缓冲区并初始化的字符串对象,最小64个字节
+*/
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	CHAR niBuf[512] = { 0 };	// name
+	POBJECT_NAME_INFORMATION nameInfo = (POBJECT_NAME_INFORMATION)niBuf;
+	ULONG ulLength = 0;
+	Name->Length = 0;
+
+	ntStatus = ObQueryNameString(Object, nameInfo, sizeof(niBuf), &ulLength);
+	if (NT_SUCCESS(ntStatus))
+	{
+		RtlCopyUnicodeString(Name, &nameInfo->Name);
+	}
+	return;
+}
+
 NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, IN OUT PDEVICE_OBJECT* AttachedToDeviceObject)
 {
 	PAGED_CODE();
@@ -188,5 +350,19 @@ NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PD
 	if (NULL == *AttachedToDeviceObject)
 		return STATUS_NO_SUCH_DEVICE;
 	return STATUS_SUCCESS;
-
 }
+
+NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(DeviceName);
+	return STATUS_SUCCESS;
+}
+
+VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	return;
+}
+
+
