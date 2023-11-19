@@ -6,32 +6,32 @@
 
 #if WINVER == 0x0500
 #ifndef FlagOn
-#define FlagOn(F,SF)       ((F) & (SF))
+#define FlagOn(_F,_SF)       ((_F) & (_SF))
 #endif
 
 #ifndef BooleanFlagOn
-#define BooleanFlagOn(F, SF)        ((BOOLEAN)(((F)&(SF)) != 0))
+#define BooleanFlagOn(_F, _SF)        ((BOOLEAN)(((_F)&(_SF)) != 0))
 #endif //
 
 #ifndef SetFlag
-#define SetFlag(F,SF)     ((F) |= (SF))
+#define SetFlag(_F,_SF)     ((_F) |= (_SF))
 #endif
 
 #ifndef ClearFlag
-#define ClearFlag(F,SF)     ((F) &= ~(SF))
+#define ClearFlag(_F,_SF)     ((_F) &= ~(_SF))
 #endif
 
-#define RtlInitEmptyUnicodeString(ucStr,buf,bufSize) \
-    ( (ucStr)->Buffer = (buf), \
-      (ucStr)->Length =0, \
-      (ucStr)->MaximumLength = (USHORT)(bufSize) )
+#define RtlInitEmptyUnicodeString(_ucStr,_buf,_bufSize) \
+    ( (_ucStr)->Buffer = (_buf), \
+      (_ucStr)->Length =0, \
+      (_ucStr)->MaximumLength = (USHORT)(_bufSize) )
 
 #ifndef min
-#define min(a,b)    (((a) < (b)) ? (a) : (b))
+#define min(_a,_b)    (((_a) < (_b)) ? (_a) : (_b))
 #endif
 
 #ifndef max
-#define max(a,b)     (((a) > (b)) ? (a) : (b))
+#define max(_a,_b)     (((_a) > (_b)) ? (_a) : (_b))
 #endif
 
 #ifdef ASSERT
@@ -46,7 +46,7 @@
 #endif
 #endif // DBG
 
-#define ExFreePoolWithTag( a, b ) ExFreePool( (a) )
+#define ExFreePoolWithTag( _a, _b ) ExFreePool( (_a) )
 #endif WINVER == 0x0500
 
 #if WINVER >= 0x0501
@@ -84,7 +84,9 @@ extern  ULONG gSfOsMinorVersion;
 #define IS_WINDOWSXP_OR_LATER()	(((gSfOsMajorVersion==5) && (gSfOsMinorVersion>=1)) || (gSfOsMajorVersion>5))
 #define IS_WINDOWSSRV2003_OR_LATER	(((gSfOsMajorVersion==5) && (gSfOsMinorVersion>=2)) || (gSfOsMajorVersion>5))
 
-NTSTATUS  SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext);
+NTSTATUS NTAPI SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext);
 VOID NTAPI SfPostFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, IN NTSTATUS OperationStatus, IN PVOID CompletionContext);
+
+NTSTATUS NTAPI SfEnumerateFileSystemVolumes(IN PDEVICE_OBJECT FSDeviceObject,IN PUNICODE_STRING FSName);
 #endif
 #endif // !_SFILTER_H

@@ -16,31 +16,36 @@
 
 extern PDEVICE_OBJECT g_SFilterControlDeviceObject;
 extern PDRIVER_OBJECT g_SFilterDriverObject;
-extern ULONG SfDebug;
+extern ULONG g_SfDebug;
 
-#define IS_MY_DEVICE_OBJECT(DeviceObject) \
-    (((DeviceObject) != NULL) && \
-     ((DeviceObject)->DriverObject == g_SFilterDriverObject) && \
-      ((DeviceObject)->DeviceExtension != NULL) && \
-	  ((*(ULONGLONG *)(DeviceObject)->DeviceExtension) == SFLT_POOL_TAG))
+#define IS_MY_DEVICE_OBJECT(_DeviceObject) \
+    (((_DeviceObject) != NULL) && \
+     ((_DeviceObject)->DriverObject == g_SFilterDriverObject) && \
+      ((_DeviceObject)->DeviceExtension != NULL) && \
+	  ((*(ULONGLONG *)(_DeviceObject)->DeviceExtension) == SFLT_POOL_TAG))
 
-#define IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject) \
-    ( ((DeviceObject) == g_SFilterControlDeviceObject) ? \
-        (ASSERT(((DeviceObject)->DriverObject == g_SFilterDriverObject) && \
-        ((DeviceObject)->DeviceExtension == NULL)), TRUE) : \
+#define IS_MY_CONTROL_DEVICE_OBJECT(_DeviceObject) \
+    ( ((_DeviceObject) == g_SFilterControlDeviceObject) ? \
+        (ASSERT(((_DeviceObject)->DriverObject == g_SFilterDriverObject) && \
+        ((_DeviceObject)->DeviceExtension == NULL)), TRUE) : \
      FALSE)
 
-/*
+#define IS_DESIRED_DEVICE_TYPE(_type) \
+        (((_type) == FILE_DEVICE_DISK_FILE_SYSTEM) || \
+          ((_type) == FILE_DEVICE_CD_ROM_FILE_SYSTEM) || \
+          ((_type) == FILE_DEVICE_NETWORK_FILE_SYSTEM))
 
+/*
 #define SF_LOG_PRINT( dbgLevel, string ) \
            (FlagOn(SfDebug,(dbgLevel)) ? DbgPrint string : ((void)0))
 */
-#define SF_LOG_PRINT( dbgLevel, string ) \
-    do { if (FlagOn(SfDebug, (dbgLevel))) DbgPrint string; } while(0)
+#define SF_LOG_PRINT( _dbgLevel, _string ) \
+    do { if (FlagOn(g_SfDebug, (_dbgLevel))) DbgPrint _string; } while(0)
 
-#define GET_DEVICE_TYPE_NAME( type ) \
-        ( (((type)>0) && ((type)< (sizeof(DeviceTypeNames) / sizeof(PCHAR)))) ? \
-        (DeviceTypeNames[ (type) ]) : ("[Unknown]") )
+
+#define GET_DEVICE_TYPE_NAME( _type ) \
+        ( (((_type)>0) && ((_type)< (sizeof(g_DeviceTypeNames) / sizeof(PCHAR)))) ? \
+        (g_DeviceTypeNames[ (_type) ]) : ("[Unknown]") )
 
 typedef struct _SFILTER_DEVICE_EXTENSION {
 
@@ -65,9 +70,12 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive);
 VOID NTAPI SfGetObjectName(IN PVOID Object, IN OUT PUNICODE_STRING Name);
 
-NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, IN OUT PDEVICE_OBJECT* AttachedToDeviceObject);
+NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, \
+                    IN OUT PDEVICE_OBJECT* AttachedToDeviceObject);
 NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName);
 VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject);
+
+VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject);  // 释放设备扩展中的内存
 
 
 #ifndef Add2Ptr

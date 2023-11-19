@@ -4,9 +4,9 @@
 
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
-ULONG SfDebug = 0;
+ULONG g_SfDebug = 0;
 
-static CONST PCHAR DeviceTypeNames[] = {
+static CONST PCHAR g_DeviceTypeNames[] = {
 	"",
 	"BEEP",
 	"CD_ROM",
@@ -164,7 +164,7 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 
 	DriverObject->FastIoDispatch = fastIoDispatch;
 
-
+#if WINVER >= 0x0501
 	/* VERSION NOTE:
 	* 有6个FastIO例程绕过了文件系统筛选器将请求直接传递到基本文件系统
 	* AcquireFileForNtCreateSection, ReleaseFileForNtCreateSection, AcquireForModWrite, ReleaseForModWrite, AcquireForCcFlush, ReleaseForCcFlush
@@ -175,7 +175,6 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	* 如果是为Windows XP及以上版本构建,则此驱动程序是为在上运行而构建的多个版本,
 	* 将进行检测用于FsFilter回调注册API的存在,如果存在,将注册这些回调.否则不会
 	*/
-#if WINVER >= 0x0501
 	FS_FILTER_CALLBACKS fsFilterCallbacks = { 0 };
 	if (NULL != gSfDynamicFunctions.RegisterFileSystemFilterCallbacks)
 	{
@@ -336,7 +335,7 @@ NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PD
 	PAGED_CODE();
 
 #if WINVER >= 0x0501
-	// 当编译的期望目标操作系统版本高于6x0561时, AttachDeviceToDeviceStackSafe可以调用,比IoAttachDeviceToDeviceStack更可靠
+	// 当编译的期望目标操作系统版本高于6x0501时, AttachDeviceToDeviceStackSafe可以调用,比IoAttachDeviceToDeviceStack更可靠
 	if (IS_WINDOWSXP_OR_LATER())
 	{
 		ASSERT(NULL != gSfDynamicFunctions.AttachDeviceToDeviceStackSafe);
@@ -354,9 +353,77 @@ NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PD
 
 NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName)
 {
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(DeviceName);
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PDEVICE_OBJECT newDeviceObject = NULL;
+	PSFILTER_DEVICE_EXTENSION devExt = NULL;
+	UNICODE_STRING fsrecName = { 0 };
+	UNICODE_STRING fsName = { 0 };
+	WCHAR tempNmaeBuffer[MAX_DEVNAME_LENGTH] = { 0 };
+	PAGED_CODE();
+
+	// 检查设备类型
+	if (!IS_DESIRED_DEVICE_TYPE(DeviceObject->DeviceType))
+		return STATUS_SUCCESS;
+	RtlInitEmptyUnicodeString(&fsName, tempNmaeBuffer, sizeof(tempNmaeBuffer));
+	RtlInitUnicodeString(&fsrecName, L"\\FileSyastem\\Fs_Rec");
+	SfGetObjectName(DeviceObject->DriverObject, &fsName);
+	// 绑定文件系统识别器的全局变量标志为0,并且要绑定的目标设备所属驱动就是文件系统识别器,直接退出
+	if (!FlagOn(g_SfDebug, SFDEBUG_ATTACH_TO_FSRECOGNIZER))
+		if (0 == RtlCompareUnicodeString(&fsName, &fsrecName, TRUE))
+			return STATUS_SUCCESS;
+
+	// 生成新设备,绑定目标设备
+	ntStatus = IoCreateDevice(g_SFilterDriverObject, sizeof(SFILTER_DEVICE_EXTENSION), NULL, \
+							DeviceObject->DeviceType, 0, FALSE, &newDeviceObject);
+	if (!NT_SUCCESS(ntStatus))
+		return ntStatus;
+
+	// 复制各种设备属性标志
+	if (FlagOn(DeviceObject->Flags, DO_BUFFERED_IO))
+		SetFlag(newDeviceObject->Flags, DO_BUFFERED_IO);
+	if (FlagOn(DeviceObject->Flags, DO_DIRECT_IO))
+		SetFlag(newDeviceObject->Flags, DO_DIRECT_IO);
+	if (FlagOn(DeviceObject->Characteristics, FILE_DEVICE_SECURE_OPEN))
+		SetFlag(newDeviceObject->Characteristics, FILE_DEVICE_SECURE_OPEN);
+	devExt = newDeviceObject->DeviceExtension;
+
+	// 绑定设备栈
+	ntStatus = SfAttachDeviceToDeviceStack(newDeviceObject, DeviceObject, &devExt->AttachedToDeviceObject);
+	if (!NT_SUCCESS(ntStatus))
+		goto ErrorCleanupDevice;
+	// 将设备名记录在设备扩展中
+	RtlInitEmptyUnicodeString(&devExt->DeviceName, devExt->DeviceNameBuffer, sizeof(devExt->DeviceNameBuffer));
+	RtlCopyUnicodeString(&devExt->DeviceName, DeviceName);
+	ClearFlag(newDeviceObject->Flags, DO_DEVICE_INITIALIZING);
+
+#if WINVER >= 0x0501
+	/*
+	* 当编译的期望目标操作系统版本高于6x0501时,
+	*	Windows内核中一定有EnumerateDeviceObjectList函数组,这时可以枚举所有卷并逐个绑定
+	* 如果期望系统比这个小,EnumerateDeviceObjectList函数组不存在,无法绑定已经加载的卷
+	*/
+	if (IS_WINDOWSXP_OR_LATER())
+	{
+		ASSERT(NULL != gSfDynamicFunctions.EnumerateDeviceObjectList &&
+			NULL != gSfDynamicFunctions.GetDiskDeviceObject &&
+			NULL != gSfDynamicFunctions.GetDeviceAttachmentBaseRef &&
+			NULL != gSfDynamicFunctions.GetLowerDeviceObject);
+		// 枚举文件系统上已有的所有卷
+		ntStatus = SfEnumerateFileSystemVolumes(DeviceObject, &fsName);
+		if (!NT_SUCCESS(ntStatus))
+		{
+			IoDetachDevice(devExt->AttachedToDeviceObject);
+			goto ErrorCleanupDevice;
+		}
+	}
+#endif // WINVER >= 0x0501
+
 	return STATUS_SUCCESS;
+
+ErrorCleanupDevice:
+	SfCleanupMountedDevice(newDeviceObject);
+	IoDeleteDevice(newDeviceObject);
+	return ntStatus;
 }
 
 VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject)
@@ -365,4 +432,9 @@ VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject)
 	return;
 }
 
-
+VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
+	return;
+}

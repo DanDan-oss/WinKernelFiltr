@@ -4,10 +4,10 @@
 #include <ntddk.h>
 
 // 判断 FAST_IO_DISPATCH处理函数是否有效的宏
-#define VALID_FAST_IO_DISPATCH_HANDLER(FastIoDispatchPtr, FastFuncName) \
-	(((FastIoDispatchPtr) != NULL) && \
-	(((FastIoDispatchPtr)->SizeOfFastIoDispatch) >= (FIELD_OFFSET(FAST_IO_DISPATCH, FastFuncName) + sizeof(void*))) && \
-	((FastIoDispatchPtr)->FastFuncName != NULL))
+#define VALID_FAST_IO_DISPATCH_HANDLER(_FastIoDispatchPtr, _FastFuncName) \
+	(((_FastIoDispatchPtr) != NULL) && \
+	(((_FastIoDispatchPtr)->SizeOfFastIoDispatch) >= (FIELD_OFFSET(FAST_IO_DISPATCH, _FastFuncName) + sizeof(void*))) && \
+	((_FastIoDispatchPtr)->_FastFuncName != NULL))
 
 
 /* 
