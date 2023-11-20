@@ -278,10 +278,39 @@ NTSTATUS NTAPI SfPassThrough(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 }
 
 NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+/*
+* 文件系统控制IRP回调函数, DriverObject->MajorFunction[IRP_MJ_FILE_SYSTEM_CONTROL] = SfFsControl;
+*/
 {
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(Irp);
-	return STATUS_SUCCESS;
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	// 当前运行IRQL级别
+	PAGED_CODE();
+	ASSERT(!IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject));
+	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
+
+	switch (irpsp->MinorFunction)
+	{
+	case IRP_MN_MOUNT_VOLUME:		// 当卷被挂载,用SfFsControlMountVolume来绑定一个卷
+		return SfFsControlMountVolume(DeviceObject, Irp);
+	case IRP_MN_LOAD_FILE_SYSTEM:	
+		// 当文件系统识别器决定加载真正的文件系统时的消息
+		// 如果已经绑定了文件系统识别器，那么现在就应该解除绑定并销毁设备，同时生成新的设备去绑定真的文件系统
+		return SfFsControlLoadFileSystem(DeviceObject, Irp);
+	case IRP_MN_USER_FS_REQUEST:
+	{
+		if (FSCTL_DISMOUNT_VOLUME == irpsp->Parameters.FileSystemControl.FsControlCode)
+		{	// 磁盘解挂载控制码,手动拔出U盘并不会导致这个请求
+			PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+			SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Dismounting volume %p \"%wZ\"\n",
+				__FUNCTIONW__, devExt->AttachedToDeviceObject, &devExt->DeviceName));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+	IoSkipCurrentIrpStackLocation(Irp);
+	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
 }
 
 VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive)
@@ -293,7 +322,7 @@ VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive)
 	RtlInitEmptyUnicodeString(&name, nameBuffer, sizeof(nameBuffer));
 	SfGetObjectName(DeviceObject, &name);
 
-	SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]!SfFsNotification: %s %p \"%wZ\" (%s)\n", \
+	SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: %s %p \"%wZ\" (%s)\n", __FUNCTIONW__, \
 		((FsActive) ? "Activating file system" : "Deactivating file system"), \
 		DeviceObject, &name, GET_DEVICE_TYPE_NAME(DeviceObject->DeviceType)) );
 
@@ -437,4 +466,122 @@ VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject)
 	UNREFERENCED_PARAMETER(DeviceObject);
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
 	return;
+}
+
+NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
+/*
+* 调用此例程是为了完成FsControl请求.向调度例程发送用于重新同步的事件信号
+*/
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+
+	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
+	ASSERT(NULL != Context);
+
+#if WINVER >= 0x0501
+	// 在Windows XP或更高版本上，传入的上下文将是一个要发出信号的事件
+	if (IS_WINDOWSXP_OR_LATER())
+		KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
+#else
+	// 对于Windows 2000,如果处于高IRQL,应该使用Context中的工作项将此工作排队到工作线程.
+	if (PASSIVE_LEVEL < KeGetCurrentIrql())
+	{
+		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, DelayedWorkQueue);
+	}
+	else
+	{
+		// IRQL处于PASSIVE_LEVEL,直接调用工作线程
+		PWORK_QUEUE_ITEM workItem = Context;
+		workItem->WorkerRoutine(workItem->Parameter);
+	}
+#endif // WINVER >= 0x0501
+
+	return STATUS_MORE_PROCESSING_REQUIRED;
+
+}
+
+NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
+/*
+* IRP IRP_MN_LOAD_FILE_SYSTEM 回调函数,数据包只是通过,直接下发,但是需要对设备栈进行处理
+*/
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+	
+
+	PAGED_CODE();
+
+	SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Loading File System, Detaching from \"%wZ\"\n", \
+		__FUNCTIONW__, &devExt->DeviceName));
+
+#if WINVER >= 0x0501
+	/* VERSION NOTE:
+	* 在Windows2000上,我们不能简单地同步回调度例程来进行加载后的文件系统处理.我们需要在被动级别上完成这项工作,
+	* 所以我们将把这项工作从完成例程排队到工作线程。
+	* 
+	* 对于Windows XP及更高版本，我们可以安全地同步回调度例程
+	*/
+
+	if (IS_WINDOWSXP_OR_LATER())
+	{
+		KEVENT waitEvent = { 0 };
+		KeInitializeEvent(&waitEvent, NotificationEvent, FALSE);
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, SfFsControlCompletion, &waitEvent, TRUE, TRUE, TRUE);
+		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+
+		// 等待操作完成
+		if (STATUS_PENDING == ntStatus)
+		{
+			ntStatus = KeWaitForSingleObject(&waitEvent, Executive, KernelMode, FALSE, NULL);
+			ASSERT(STATUS_SUCCESS == ntStatus);
+		}
+
+		// 验证是否调用IoCompleteRequest
+		ASSERT(KeReadStateEvent(&waitEvent) || !NT_SUCCESS(Irp->IoStatus.Status));
+		ntStatus = SfFsControlLoadFileSystemComplete(DeviceObject, Irp);
+	}
+#else
+	// 设置一个完成例程，在加载完成时删除设备对象
+	PFSCTRL_COMPLETION_CONTEXT completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(PFSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
+	if (NULL == completionContext)
+	{
+		IoSkipCurrentIrpStackLocation(Irp);
+		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+	}
+	else
+	{
+		ExInitializeWorkItem(&completionContext->WorkItem, SfFsControlLoadFileSystemCompleteWorker, completionContext);
+		completionContext->DeviceObject = DeviceObject;
+		completionContext->Irp = Irp;
+		completionContext->NewDeviceObject = NULL;
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, SfFsControlCompletion, completionContext, TRUE, TRUE, TRUE);
+		IoDetachDevice(devExt->AttachedToDeviceObject);
+		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+	}
+#endif // WINVER >= 0x0501
+
+
+	return ntStatus;
+}
+
+NTSTATUS NTAPI SfFsControlLoadFileSystemComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	return STATUS_SUCCESS;
+}
+VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context)
+{
+	UNREFERENCED_PARAMETER(Context);
+	return;
+}
+
+NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	return STATUS_SUCCESS;
 }

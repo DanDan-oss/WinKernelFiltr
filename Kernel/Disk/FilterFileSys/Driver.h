@@ -57,6 +57,14 @@ typedef struct _SFILTER_DEVICE_EXTENSION {
     UCHAR UserExtension[1];							// ÆäËûÀ©Õ¹
 } SFILTER_DEVICE_EXTENSION, * PSFILTER_DEVICE_EXTENSION;
 
+typedef struct _FSCTRL_COMPLETION_CONTEXT
+{
+    WORK_QUEUE_ITEM WorkItem;                   // Èç¹û´ËÍê³É´¦ÀíÐèÒªÔÚ¹¤×÷Ïß³ÌÖÐÍê³É£¬Ôò½«Ê¹ÓÃÉÏÏÂÎÄºÍ¹¤×÷Àý³Ì³õÊ¼»¯µÄ¹¤×÷Ïî
+    PDEVICE_OBJECT DeviceObject;                // ´ËÉè±¸µ±Ç°Ö¸ÏòµÄÉè±¸¶ÔÏó
+    PIRP Irp;                                   // ´ËFSCTRL²Ù×÷µÄIRPÏûÏ¢
+    PDEVICE_OBJECT NewDeviceObject;             // ÎÒÃÇÒÑ¾­·ÖÅä²¢²¿·Ö³õÊ¼»¯µÄÐÂÉè±¸¶ÔÏó£¬Èç¹û×°ÔØ³É¹¦£¬ÎÒÃÇ½«¸½¼Óµ½ÒÑ×°ÔØµÄ¾í
+}FSCTRL_COMPLETION_CONTEXT, *PFSCTRL_COMPLETION_CONTEXT;
+
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 VOID NTAPI DriverUnload(PDRIVER_OBJECT DriverObject);
 
@@ -74,8 +82,13 @@ NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PD
                     IN OUT PDEVICE_OBJECT* AttachedToDeviceObject);
 NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName);
 VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject);
-
 VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject);  // ÊÍ·ÅÉè±¸À©Õ¹ÖÐµÄÄÚ´æ
+NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context);
+NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+NTSTATUS NTAPI SfFsControlLoadFileSystemComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
+
+NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 
 
 #ifndef Add2Ptr
@@ -94,10 +107,13 @@ VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject);  // ÊÍ·ÅÉè±¸À
 #pragma alloc_text(PAGE, SfCleanupClose)
 #pragma alloc_text(PAGE, SfFsControl)
 #pragma alloc_text(PAGE, SfFsNotification)
+#pragma alloc_text(PAGE, SfFsControlMountVolume)
 
 #pragma alloc_text(PAGE, SfAttachToFileSystemDevice)
 #pragma alloc_text(PAGE, SfAttachDeviceToDeviceStack)
 #pragma alloc_text(PAGE, SfDetachFromFileSystemDevice)
+#pragma alloc_text(PAGE, SfFsControlLoadFileSystem)
+#pragma alloc_text(PAGE, SfFsControlLoadFileSystemComplete)
 #endif
 
 #endif // !_DIRVER_H
