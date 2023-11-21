@@ -283,7 +283,6 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 */
 {
 	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
-	// 当前运行IRQL级别
 	PAGED_CODE();
 	ASSERT(!IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject));
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
@@ -479,26 +478,27 @@ NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
 	ASSERT(NULL != Context);
 
+	// 高版本使用等待事件,低版本使用工作任务
 #if WINVER >= 0x0501
 	// 在Windows XP或更高版本上，传入的上下文将是一个要发出信号的事件
 	if (IS_WINDOWSXP_OR_LATER())
 		KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
 #else
 	// 对于Windows 2000,如果处于高IRQL,应该使用Context中的工作项将此工作排队到工作线程.
+	// IRQL中断级别过高时,工作任务放到DelayedWorkQueue队列执行
 	if (PASSIVE_LEVEL < KeGetCurrentIrql())
 	{
 		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, DelayedWorkQueue);
+		return STATUS_MORE_PROCESSING_REQUIRED;
 	}
-	else
-	{
-		// IRQL处于PASSIVE_LEVEL,直接调用工作线程
-		PWORK_QUEUE_ITEM workItem = Context;
-		workItem->WorkerRoutine(workItem->Parameter);
-	}
+
+	// IRQL处于PASSIVE_LEVEL,直接调用工作线程
+	PWORK_QUEUE_ITEM workItem = Context;
+	workItem->WorkerRoutine(workItem->Parameter);
+
 #endif // WINVER >= 0x0501
 
 	return STATUS_MORE_PROCESSING_REQUIRED;
-
 }
 
 NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
@@ -515,9 +515,10 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 	SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Loading File System, Detaching from \"%wZ\"\n", \
 		__FUNCTIONW__, &devExt->DeviceName));
 
+	// 高版本系统使用等待事件,低版本使用工作任务
 #if WINVER >= 0x0501
 	/* VERSION NOTE:
-	* 在Windows2000上,我们不能简单地同步回调度例程来进行加载后的文件系统处理.我们需要在被动级别上完成这项工作,
+	* 在Windows2000上,我们不能简单地同步回调度例程来进行加载后的文件系统处理.我们需要在dispatch级别上完成这项工作,
 	* 所以我们将把这项工作从完成例程排队到工作线程。
 	* 
 	* 对于Windows XP及更高版本，我们可以安全地同步回调度例程
@@ -549,20 +550,17 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 	{
 		IoSkipCurrentIrpStackLocation(Irp);
 		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+		return ntStatus;
 	}
-	else
-	{
-		ExInitializeWorkItem(&completionContext->WorkItem, SfFsControlLoadFileSystemCompleteWorker, completionContext);
-		completionContext->DeviceObject = DeviceObject;
-		completionContext->Irp = Irp;
-		completionContext->NewDeviceObject = NULL;
-		IoCopyCurrentIrpStackLocationToNext(Irp);
-		IoSetCompletionRoutine(Irp, SfFsControlCompletion, completionContext, TRUE, TRUE, TRUE);
-		IoDetachDevice(devExt->AttachedToDeviceObject);
-		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
-	}
+	ExInitializeWorkItem(&completionContext->WorkItem, SfFsControlLoadFileSystemCompleteWorker, completionContext);
+	completionContext->DeviceObject = DeviceObject;
+	completionContext->Irp = Irp;
+	completionContext->NewDeviceObject = NULL;
+	IoCopyCurrentIrpStackLocationToNext(Irp);
+	IoSetCompletionRoutine(Irp, SfFsControlCompletion, completionContext, TRUE, TRUE, TRUE);
+	IoDetachDevice(devExt->AttachedToDeviceObject);
+	ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
 #endif // WINVER >= 0x0501
-
 
 	return ntStatus;
 }
@@ -580,8 +578,125 @@ VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT
 }
 
 NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
+/* 处理 IRP_MN_MOUNT_VOLUME消息(当卷被挂载),用来绑定一个卷*/
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	PDEVICE_OBJECT newDeviceObject = NULL;
+	PDEVICE_OBJECT storageStackDeviceObject = NULL;
+	PSFILTER_DEVICE_EXTENSION newDevExt = NULL;
+	BOOLEAN isShadowCopyVolume = 0;
+
+	PAGED_CODE();
+	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
+	ASSERT(IS_DESIRED_DEVICE_TYPE(DeviceObject->DeviceType));
+
+	// 保存Vpb->RealDevice
+	storageStackDeviceObject = irpsp->Parameters.MountVolume.Vpb->RealDevice;
+
+	// 判断是否是影卷,如果不打算绑定直接下发跳过
+	ntStatus = SfIsShadowCopyVolume(storageStackDeviceObject, &isShadowCopyVolume);
+	if (NT_SUCCESS(ntStatus) && isShadowCopyVolume && !FlagOn(g_SfDebug, SFDEBUG_ATTACH_TO_SHADOW_COPIES))
+	{
+		UNICODE_STRING shadowDeviceName = { 0 };
+		WCHAR shadowNameBuffer[MAX_DEVNAME_LENGTH] = { 0 };
+		RtlInitEmptyUnicodeString(&shadowDeviceName, shadowNameBuffer, sizeof(shadowNameBuffer));
+		SfGetObjectName(storageStackDeviceObject, &shadowDeviceName);
+		SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Not attaching to volume %p \"%wZ\", shadow copy volume\n", \
+			__FUNCTIONW__, storageStackDeviceObject, &shadowDeviceName));
+
+		IoSkipCurrentIrpStackLocation(Irp);
+		return IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+	}
+
+	// 生成过滤设备
+	ntStatus = IoCreateDevice(g_SFilterDriverObject, sizeof(SFILTER_DEVICE_EXTENSION), NULL, DeviceObject->DeviceType, \
+		0, FALSE, &newDeviceObject);
+	if (!NT_SUCCESS(ntStatus))
+	{
+		KdPrint(("[dbg]![%ws]: Error creating volume device object,, status =%08x\n ", __FUNCTIONW__, ntStatus));
+		Irp->IoStatus.Information = 0;
+		Irp->IoStatus.Status = ntStatus;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return ntStatus;
+	}
+
+	// 设置设备扩展
+	newDevExt = newDeviceObject->DeviceExtension;
+	newDevExt->StorageStackDeviceObject = storageStackDeviceObject;
+	RtlInitEmptyUnicodeString(&newDevExt->DeviceName, newDevExt->DeviceNameBuffer, sizeof(newDevExt->DeviceNameBuffer));
+	SfGetObjectName(storageStackDeviceObject, &newDevExt->DeviceName);
+
+	// 高版本系统使用等待事件,低版本使用工作任务
+#if WINVER >= 0x0501
+	/* VERSION NOTE:
+	*  在Windows2000上,不能简单地同步回调度例程来进行装载后处理. 需要在dispatch级别上完成，所以我们将把这项workerItem从完成例程排队到工作线程.
+	* 因为绑定卷的过程中,sfilter使用了ExAcquireFastMutex来来等待这些不适宜在Dispatch级别使用的函数,可能在绑定设备时会发生死锁. 
+	* 解决方法是在完成函数中把任务放到一个预先生成的系统线程中处理.系统线程执行的中断级别为Passive中断级,在这个线程中完成绑定是没有问题的
+	* 
+	*  Windows XP及更高版本，我们可以安全地同步回调度例程
+	*/
+	if (IS_WINDOWSXP_OR_LATER())
+	{
+		KEVENT waitEvent = { 0 };
+		KeInitializeEvent(&waitEvent, NotificationEvent, FALSE);
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, SfFsControlCompletion, &waitEvent, TRUE, TRUE, TRUE);
+
+		// 发送IRP并等待事件完成
+		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+		if (STATUS_PENDING == ntStatus)
+		{
+			ntStatus = KeWaitForSingleObject(&waitEvent, Executive, KernelMode, FALSE, NULL);
+			ASSERT(STATUS_SUCCESS == ntStatus);
+		}
+
+		// 绑定卷
+		ASSERT(KeReadStateEvent(&waitEvent) || !NT_SUCCESS(Irp->IoStatus.Status));
+		ntStatus = SfFsControlMountVolumeComplete(DeviceObject, Irp, newDeviceObject);
+	}
+
+#else
+	PFSCTRL_COMPLETION_CONTEXT completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(FSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
+	if (NULL == completionContext)
+	{
+		IoSkipCurrentIrpStackLocation(Irp);
+		ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+		return ntStatus;
+	}
+	// 初始化一个工作任务,写入上下文
+	ExInitializeWorkItem(&completionContext->WorkItem, SfFsControlMountVolumeCompleteWorker, completionContext);
+	completionContext->DeviceObject = DeviceObject;
+	completionContext->Irp = Irp;
+	completionContext->NewDeviceObject = newDeviceObject;
+	IoCopyCurrentIrpStackLocationToNext(Irp);
+	IoSetCompletionRoutine(Irp, SfFsControlCompletion, &completionContext->WorkItem, TRUE, TRUE, TRUE);
+	ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+
+#endif // WINVER >= 0x0501
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, OUT PBOOLEAN IsShadowCopy)
+{
+	UNREFERENCED_PARAMETER(StorageStackDeviceObject);
+	UNREFERENCED_PARAMETER(IsShadowCopy);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PDEVICE_OBJECT NewDeviceObject)
 {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	UNREFERENCED_PARAMETER(Irp);
+	UNREFERENCED_PARAMETER(NewDeviceObject);
 	return STATUS_SUCCESS;
+}
+
+VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context)
+{
+	ASSERT(NULL != Context);
+	SfFsControlMountVolumeComplete(Context->DeviceObject, Context->Irp, Context->NewDeviceObject);
+	ExFreePoolWithTag(Context, SFLT_POOL_TAG);
 }

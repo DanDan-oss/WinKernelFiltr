@@ -89,6 +89,10 @@ NTSTATUS NTAPI SfFsControlLoadFileSystemComplete(IN PDEVICE_OBJECT DeviceObject,
 VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
 
 NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, OUT PBOOLEAN IsShadowCopy);
+NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PDEVICE_OBJECT NewDeviceObject);
+VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
+
 
 
 #ifndef Add2Ptr
@@ -108,6 +112,8 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 #pragma alloc_text(PAGE, SfFsControl)
 #pragma alloc_text(PAGE, SfFsNotification)
 #pragma alloc_text(PAGE, SfFsControlMountVolume)
+#pragma alloc_text(PAGE, SfIsShadowCopyVolume)
+#pragma alloc_text(PAGE, SfFsControlMountVolumeComplete)
 
 #pragma alloc_text(PAGE, SfAttachToFileSystemDevice)
 #pragma alloc_text(PAGE, SfAttachDeviceToDeviceStack)
