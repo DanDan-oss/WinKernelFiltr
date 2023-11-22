@@ -4,6 +4,7 @@
 
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
+FAST_MUTEX g_SfilterAttachLock = {0};
 ULONG g_SfDebug = 0;
 
 static CONST PCHAR g_DeviceTypeNames[] = {
@@ -176,7 +177,7 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	* 将进行检测用于FsFilter回调注册API的存在,如果存在,将注册这些回调.否则不会
 	*/
 	FS_FILTER_CALLBACKS fsFilterCallbacks = { 0 };
-	if (NULL != gSfDynamicFunctions.RegisterFileSystemFilterCallbacks)
+	if (NULL != g_SfDynamicFunctions.RegisterFileSystemFilterCallbacks)
 	{
 		fsFilterCallbacks.SizeOfFsFilterCallbacks = sizeof(FS_FILTER_CALLBACKS);
 		fsFilterCallbacks.PreAcquireForSectionSynchronization = SfPreFsFilterPassThrough;
@@ -192,7 +193,7 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 		fsFilterCallbacks.PreReleaseForModifiedPageWriter = SfPreFsFilterPassThrough;
 		fsFilterCallbacks.PostReleaseForModifiedPageWriter = SfPostFsFilterPassThrough;
 
-		ntStatus = (gSfDynamicFunctions.RegisterFileSystemFilterCallbacks)(DriverObject, &fsFilterCallbacks);
+		ntStatus = (g_SfDynamicFunctions.RegisterFileSystemFilterCallbacks)(DriverObject, &fsFilterCallbacks);
 		if (!NT_SUCCESS(ntStatus))
 		{
 			ExFreePool(fastIoDispatch);
@@ -358,27 +359,6 @@ VOID NTAPI SfGetObjectName(IN PVOID Object, IN OUT PUNICODE_STRING Name)
 	return;
 }
 
-NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, IN OUT PDEVICE_OBJECT* AttachedToDeviceObject)
-{
-	PAGED_CODE();
-
-#if WINVER >= 0x0501
-	// 当编译的期望目标操作系统版本高于6x0501时, AttachDeviceToDeviceStackSafe可以调用,比IoAttachDeviceToDeviceStack更可靠
-	if (IS_WINDOWSXP_OR_LATER())
-	{
-		ASSERT(NULL != gSfDynamicFunctions.AttachDeviceToDeviceStackSafe);
-		return (gSfDynamicFunctions.AttachDeviceToDeviceStackSafe)(SourceDevice, TargetDevice, AttachedToDeviceObject);
-	}
-	ASSERT(NULL == gSfDynamicFunctions.AttachDeviceToDeviceStackSafe);
-#endif // WINVER >= 0x0501
-
-	*AttachedToDeviceObject = TargetDevice;
-	*AttachedToDeviceObject = IoAttachDeviceToDeviceStack(SourceDevice, TargetDevice);
-	if (NULL == *AttachedToDeviceObject)
-		return STATUS_NO_SUCH_DEVICE;
-	return STATUS_SUCCESS;
-}
-
 NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
@@ -432,10 +412,10 @@ NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUN
 	*/
 	if (IS_WINDOWSXP_OR_LATER())
 	{
-		ASSERT(NULL != gSfDynamicFunctions.EnumerateDeviceObjectList &&
-			NULL != gSfDynamicFunctions.GetDiskDeviceObject &&
-			NULL != gSfDynamicFunctions.GetDeviceAttachmentBaseRef &&
-			NULL != gSfDynamicFunctions.GetLowerDeviceObject);
+		ASSERT(NULL != g_SfDynamicFunctions.EnumerateDeviceObjectList &&
+			NULL != g_SfDynamicFunctions.GetDiskDeviceObject &&
+			NULL != g_SfDynamicFunctions.GetDeviceAttachmentBaseRef &&
+			NULL != g_SfDynamicFunctions.GetLowerDeviceObject);
 		// 枚举文件系统上已有的所有卷
 		ntStatus = SfEnumerateFileSystemVolumes(DeviceObject, &fsName);
 		if (!NT_SUCCESS(ntStatus))
@@ -482,21 +462,23 @@ NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp
 #if WINVER >= 0x0501
 	// 在Windows XP或更高版本上，传入的上下文将是一个要发出信号的事件
 	if (IS_WINDOWSXP_OR_LATER())
+	{
 		KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
-#else
+		return STATUS_MORE_PROCESSING_REQUIRED;
+	}
+#endif // WINVER >= 0x0501
+
 	// 对于Windows 2000,如果处于高IRQL,应该使用Context中的工作项将此工作排队到工作线程.
 	// IRQL中断级别过高时,工作任务放到DelayedWorkQueue队列执行
 	if (PASSIVE_LEVEL < KeGetCurrentIrql())
 	{
-		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, DelayedWorkQueue);
+		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, (WORK_QUEUE_TYPE)DelayedWorkQueue);
 		return STATUS_MORE_PROCESSING_REQUIRED;
 	}
 
 	// IRQL处于PASSIVE_LEVEL,直接调用工作线程
 	PWORK_QUEUE_ITEM workItem = Context;
 	workItem->WorkerRoutine(workItem->Parameter);
-
-#endif // WINVER >= 0x0501
 
 	return STATUS_MORE_PROCESSING_REQUIRED;
 }
@@ -508,6 +490,7 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+	PFSCTRL_COMPLETION_CONTEXT completionContext = NULL;
 	
 
 	PAGED_CODE();
@@ -542,10 +525,12 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 		// 验证是否调用IoCompleteRequest
 		ASSERT(KeReadStateEvent(&waitEvent) || !NT_SUCCESS(Irp->IoStatus.Status));
 		ntStatus = SfFsControlLoadFileSystemComplete(DeviceObject, Irp);
+		return ntStatus;
 	}
-#else
+#endif // WINVER >= 0x0501
+
 	// 设置一个完成例程，在加载完成时删除设备对象
-	PFSCTRL_COMPLETION_CONTEXT completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(PFSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
+	completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(PFSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
 	if (NULL == completionContext)
 	{
 		IoSkipCurrentIrpStackLocation(Irp);
@@ -560,8 +545,6 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 	IoSetCompletionRoutine(Irp, SfFsControlCompletion, completionContext, TRUE, TRUE, TRUE);
 	IoDetachDevice(devExt->AttachedToDeviceObject);
 	ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
-#endif // WINVER >= 0x0501
-
 	return ntStatus;
 }
 
@@ -577,6 +560,43 @@ VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT
 	return;
 }
 
+NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT SFilterDeviceObject)
+/* 绑定设备*/
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PSFILTER_DEVICE_EXTENSION newDevExt = SFilterDeviceObject->DeviceExtension;
+
+	PAGED_CODE();
+	ASSERT(IS_MY_DEVICE_OBJECT(SFilterDeviceObject));
+#if WINVER >= 0x0501
+	ASSERT(!SfIsAttachedToDevice(DeviceObject, NULL));
+#endif // WINVER >= 0x501
+
+	// 赋值设备属性标志
+	if (FlagOn(DeviceObject->Flags, DO_BUFFERED_IO))
+		SetFlag(SFilterDeviceObject->Flags, DO_BUFFERED_IO);
+	if(FlagOn(DeviceObject->Flags, DO_DIRECT_IO))
+		SetFlag(SFilterDeviceObject->Flags, DO_DIRECT_IO);
+
+	// 循环尝试绑定,如果当前恰好在对这个磁盘做特殊操作(挂载或者解挂载操作有关),绑定可能失败.
+	for (ULONG i = 0; i < 8; ++i)
+	{
+		LARGE_INTEGER interval = { 0 };
+		ntStatus = SfAttachDeviceToDeviceStack(SFilterDeviceObject, DeviceObject, &newDevExt->AttachedToDeviceObject);
+		if (NT_SUCCESS(ntStatus))
+		{
+			ClearFlag(SFilterDeviceObject->Flags, DO_DEVICE_INITIALIZING);
+			return STATUS_SUCCESS;
+		}
+
+		// 延迟1sec
+		interval.QuadPart = (1000 * DELAY_ONE_MILLISECOND);
+		KeDelayExecutionThread(KernelMode, FALSE, &interval);
+		continue;
+	}
+	return ntStatus;
+}
+
 NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 /* 处理 IRP_MN_MOUNT_VOLUME消息(当卷被挂载),用来绑定一个卷*/
 {
@@ -587,6 +607,7 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 	PDEVICE_OBJECT storageStackDeviceObject = NULL;
 	PSFILTER_DEVICE_EXTENSION newDevExt = NULL;
 	BOOLEAN isShadowCopyVolume = 0;
+	PFSCTRL_COMPLETION_CONTEXT completionContext = NULL;
 
 	PAGED_CODE();
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
@@ -655,10 +676,11 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 		// 绑定卷
 		ASSERT(KeReadStateEvent(&waitEvent) || !NT_SUCCESS(Irp->IoStatus.Status));
 		ntStatus = SfFsControlMountVolumeComplete(DeviceObject, Irp, newDeviceObject);
+		return ntStatus;
 	}
+#endif // WINVER >= 0x0501
 
-#else
-	PFSCTRL_COMPLETION_CONTEXT completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(FSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
+	completionContext = ExAllocatePoolWithTag(NonPagedPool, sizeof(FSCTRL_COMPLETION_CONTEXT), SFLT_POOL_TAG);
 	if (NULL == completionContext)
 	{
 		IoSkipCurrentIrpStackLocation(Irp);
@@ -673,10 +695,7 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 	IoCopyCurrentIrpStackLocationToNext(Irp);
 	IoSetCompletionRoutine(Irp, SfFsControlCompletion, &completionContext->WorkItem, TRUE, TRUE, TRUE);
 	ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
-
-#endif // WINVER >= 0x0501
-
-	return STATUS_SUCCESS;
+	return ntStatus;
 }
 
 NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, OUT PBOOLEAN IsShadowCopy)
@@ -688,10 +707,62 @@ NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, 
 
 NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PDEVICE_OBJECT NewDeviceObject)
 {
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(Irp);
-	UNREFERENCED_PARAMETER(NewDeviceObject);
-	return STATUS_SUCCESS;
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PSFILTER_DEVICE_EXTENSION newDevExt = NewDeviceObject->DeviceExtension;
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	PDEVICE_OBJECT attachedDeviceObject = NULL;
+	PVPB vbp = { 0 };
+
+	PAGED_CODE();
+	vbp = newDevExt->StorageStackDeviceObject->Vpb;
+	if (vbp != irpsp->Parameters.MountVolume.Vpb)
+	{
+		SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: VPB in IRP stack changed %p IRPVPB=%p VPB=%p\n",
+						__FUNCTIONW__, vbp->DeviceObject, irpsp->Parameters.MountVolume.Vpb, vbp));
+	}
+
+	do
+	{
+		if (!NT_SUCCESS(Irp->IoStatus.Status))
+		{
+			SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Mount volume failure for %p \"%wZ\", status=%08x\n",
+							__FUNCTIONW__, DeviceObject, &newDevExt->DeviceName, Irp->IoStatus.Status));
+			SfCleanupMountedDevice(NewDeviceObject);
+			IoDeleteDevice(NewDeviceObject);
+			break;
+		}
+
+		// 获取一个互斥体内核对象, 以'原子方式'判断是否绑定过该卷设备,防止同时对一个卷设备绑定两次
+		ExAcquireFastMutex(&g_SfilterAttachLock);
+		if (SfIsAttachedToDevice(vbp->DeviceObject, &attachedDeviceObject))
+		{	// 说明已经绑定过了
+			if(attachedDeviceObject)
+				SF_LOG_PRINT(SFDEBUG_DISPLAY_ATTACHMENT_NAMES, ("[dbg]![%ws]: Mount volume failure for %p \"%wZ\", already attached\n",
+						__FUNCTIONW__, ((PSFILTER_DEVICE_EXTENSION)attachedDeviceObject->DeviceExtension)->AttachedToDeviceObject,
+						&newDevExt->DeviceName));
+			SfCleanupMountedDevice(NewDeviceObject);
+			IoDeleteDevice(NewDeviceObject);
+			if (attachedDeviceObject)
+				ObDereferenceObject(attachedDeviceObject);
+			ExReleaseFastMutex(&g_SfilterAttachLock);
+			break;
+		}
+
+		// 调用 SfAttachToMountedDevice完成绑定
+		ntStatus = SfAttachToMountedDevice(vbp->DeviceObject, NewDeviceObject);
+		if (!NT_SUCCESS(ntStatus))
+		{
+			SfCleanupMountedDevice(NewDeviceObject);
+			IoDeleteDevice(NewDeviceObject);
+		}
+		ASSERT(NULL == attachedDeviceObject);
+		ExReleaseFastMutex(&g_SfilterAttachLock);
+	} while (FALSE);
+
+	//完成请求
+	ntStatus = Irp->IoStatus.Status;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+	return ntStatus;
 }
 
 VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context)
@@ -700,3 +771,4 @@ VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Co
 	SfFsControlMountVolumeComplete(Context->DeviceObject, Context->Irp, Context->NewDeviceObject);
 	ExFreePoolWithTag(Context, SFLT_POOL_TAG);
 }
+

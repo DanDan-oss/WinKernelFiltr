@@ -13,6 +13,9 @@
 #define SFDEBUG_ATTACH_TO_FSRECOGNIZER      0x00000010      // 附加到FSRecognizer设备对象
 #define SFDEBUG_ATTACH_TO_SHADOW_COPIES     0x00000020      // 接到ShadowCopy Volume设备对象-- 它们仅在Windows XP及更高版本上存在
 
+#define DELAY_ONE_MICROSECOND   (-10)
+#define DELAY_ONE_MILLISECOND   (DELAY_ONE_MICROSECOND*1000)
+#define DELAY_ONE_SECOND        (DELAY_ONE_MILLISECOND*1000)
 
 extern PDEVICE_OBJECT g_SFilterControlDeviceObject;
 extern PDRIVER_OBJECT g_SFilterDriverObject;
@@ -78,8 +81,7 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive);
 VOID NTAPI SfGetObjectName(IN PVOID Object, IN OUT PUNICODE_STRING Name);
 
-NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, \
-                    IN OUT PDEVICE_OBJECT* AttachedToDeviceObject);
+
 NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUNICODE_STRING DeviceName);
 VOID NTAPI SfDetachFromFileSystemDevice(IN PDEVICE_OBJECT DeviceObject);
 VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject);  // 释放设备扩展中的内存
@@ -88,6 +90,7 @@ NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP
 NTSTATUS NTAPI SfFsControlLoadFileSystemComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 VOID NTAPI SfFsControlLoadFileSystemCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
 
+NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT SFilterDeviceObject);
 NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
 NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, OUT PBOOLEAN IsShadowCopy);
 NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PDEVICE_OBJECT NewDeviceObject);
@@ -111,15 +114,14 @@ VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Co
 #pragma alloc_text(PAGE, SfCleanupClose)
 #pragma alloc_text(PAGE, SfFsControl)
 #pragma alloc_text(PAGE, SfFsNotification)
-#pragma alloc_text(PAGE, SfFsControlMountVolume)
-#pragma alloc_text(PAGE, SfIsShadowCopyVolume)
-#pragma alloc_text(PAGE, SfFsControlMountVolumeComplete)
 
 #pragma alloc_text(PAGE, SfAttachToFileSystemDevice)
-#pragma alloc_text(PAGE, SfAttachDeviceToDeviceStack)
 #pragma alloc_text(PAGE, SfDetachFromFileSystemDevice)
 #pragma alloc_text(PAGE, SfFsControlLoadFileSystem)
 #pragma alloc_text(PAGE, SfFsControlLoadFileSystemComplete)
-#endif
 
+#pragma alloc_text(PAGE, SfFsControlMountVolume)
+#pragma alloc_text(PAGE, SfIsShadowCopyVolume)
+#pragma alloc_text(PAGE, SfFsControlMountVolumeComplete)
+#endif // !ALLOC_PRAGMA
 #endif // !_DIRVER_H
