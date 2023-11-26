@@ -6,32 +6,32 @@
 
 #if WINVER == 0x0500
 #ifndef FlagOn
-#define FlagOn(F,SF)       ((F) & (SF))
+#define FlagOn(_F,_SF)       ((_F) & (_SF))
 #endif
 
 #ifndef BooleanFlagOn
-#define BooleanFlagOn(F, SF)        ((BOOLEAN)(((F)&(SF)) != 0))
+#define BooleanFlagOn(_F, _SF)        ((BOOLEAN)(((_F)&(_SF)) != 0))
 #endif //
 
 #ifndef SetFlag
-#define SetFlag(F,SF)     ((F) |= (SF))
+#define SetFlag(_F,_SF)     ((_F) |= (_SF))
 #endif
 
 #ifndef ClearFlag
-#define ClearFlag(F,SF)     ((F) &= ~(SF))
+#define ClearFlag(_F,_SF)     ((_F) &= ~(_SF))
 #endif
 
-#define RtlInitEmptyUnicodeString(ucStr,buf,bufSize) \
-    ( (ucStr)->Buffer = (buf), \
-      (ucStr)->Length =0, \
-      (ucStr)->MaximumLength = (USHORT)(bufSize) )
+#define RtlInitEmptyUnicodeString(_ucStr,_buf,_bufSize) \
+    ( (_ucStr)->Buffer = (_buf), \
+      (_ucStr)->Length =0, \
+      (_ucStr)->MaximumLength = (USHORT)(_bufSize) )
 
 #ifndef min
-#define min(a,b)    (((a) < (b)) ? (a) : (b))
+#define min(_a,_b)    (((_a) < (_b)) ? (_a) : (_b))
 #endif
 
 #ifndef max
-#define max(a,b)     (((a) > (b)) ? (a) : (b))
+#define max(_a,_b)     (((_a) > (_b)) ? (_a) : (_b))
 #endif
 
 #ifdef ASSERT
@@ -46,7 +46,7 @@
 #endif
 #endif // DBG
 
-#define ExFreePoolWithTag( a, b ) ExFreePool( (a) )
+#define ExFreePoolWithTag( _a, _b ) ExFreePool( (_a) )
 #endif WINVER == 0x0500
 
 #if WINVER >= 0x0501
@@ -74,17 +74,40 @@ typedef struct _SF_DYNAMIC_FUNCTION_POINTERS
     PSF_GET_VERSION GetVersion;
 }SF_DYNAMIC_FUNCTION_POINTERS, *PSF_DYNAMIC_FUNCTION_POINTERS;
 
-extern  SF_DYNAMIC_FUNCTION_POINTERS gSfDynamicFunctions;
-extern  ULONG gSfOsMajorVersion;
-extern  ULONG gSfOsMinorVersion;
+extern  SF_DYNAMIC_FUNCTION_POINTERS g_SfDynamicFunctions;
+extern  ULONG g_SfOsMajorVersion;
+extern  ULONG g_SfOsMinorVersion;
 
 
-#define IS_WINDOWS2000()		((gSfOsMajorVersion==5) && (gSfOsMinorVersion==0))
-#define IS_WINDOWSXP()			((gSfOsMajorVersion==5) && (gSfOsMinorVersion ==1))
-#define IS_WINDOWSXP_OR_LATER()	(((gSfOsMajorVersion==5) && (gSfOsMinorVersion>=1)) || (gSfOsMajorVersion>5))
-#define IS_WINDOWSSRV2003_OR_LATER	(((gSfOsMajorVersion==5) && (gSfOsMinorVersion>=2)) || (gSfOsMajorVersion>5))
-
-NTSTATUS  SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext);
-VOID NTAPI SfPostFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, IN NTSTATUS OperationStatus, IN PVOID CompletionContext);
+#define IS_WINDOWS2000()		((g_SfOsMajorVersion==5) && (g_SfOsMinorVersion==0))
+#define IS_WINDOWSXP()			((g_SfOsMajorVersion==5) && (g_SfOsMinorVersion ==1))
+#define IS_WINDOWSXP_OR_LATER()	(((g_SfOsMajorVersion==5) && (g_SfOsMinorVersion>=1)) || (g_SfOsMajorVersion>5))
+#define IS_WINDOWSSRV2003_OR_LATER	(((g_SfOsMajorVersion==5) && (g_SfOsMinorVersion>=2)) || (g_SfOsMajorVersion>5))
 #endif
+
+
+NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, \
+    IN OUT PDEVICE_OBJECT* AttachedToDeviceObject);
+
+BOOLEAN NTAPI SfIsAttachedToDevice(PDEVICE_OBJECT DeviceObject, PDEVICE_OBJECT* AttachedDeviceObject OPTIONAL);
+BOOLEAN NTAPI SfIsAttachedToDeviceW2K(PDEVICE_OBJECT DeviceObject, PDEVICE_OBJECT* AttachedDeviceObject OPTIONAL);
+BOOLEAN NTAPI SfIsAttachedToDeviceWXPAndLater(PDEVICE_OBJECT DeviceObject, PDEVICE_OBJECT* AttachedDeviceObject OPTIONAL);
+
+#if WINVER >= 0x0501
+NTSTATUS NTAPI SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext);
+VOID NTAPI SfPostFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, IN NTSTATUS OperationStatus, IN PVOID CompletionContext);
+NTSTATUS NTAPI SfEnumerateFileSystemVolumes(IN PDEVICE_OBJECT FSDeviceObject, IN PUNICODE_STRING FSName);
+#endif
+
+
+
+#ifdef ALLOC_PRAGMA
+#pragma alloc_text(PAGE, SfAttachDeviceToDeviceStack)
+#pragma alloc_text(PAGE, SfIsAttachedToDevice)
+#pragma alloc_text(PAGE, SfIsAttachedToDeviceW2K)
+#if WINVER >= 0x0501
+#pragma alloc_text(PAGE, SfIsAttachedToDeviceWXPAndLater)
+#pragma alloc_text(PAGE, SfEnumerateFileSystemVolumes)
+#endif
+#endif // !ALLOC_PRAGMA
 #endif // !_SFILTER_H
