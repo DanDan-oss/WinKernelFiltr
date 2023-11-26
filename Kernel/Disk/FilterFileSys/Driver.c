@@ -122,6 +122,8 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	DriverObject->MajorFunction[IRP_MJ_FILE_SYSTEM_CONTROL] = SfFsControl;
 	DriverObject->MajorFunction[IRP_MJ_CLEANUP] = SfCleanupClose;
 	DriverObject->MajorFunction[IRP_MJ_CLOSE] = SfCleanupClose;
+	DriverObject->MajorFunction[IRP_MJ_READ] = SfRead;
+	DriverObject->MajorFunction[IRP_MJ_WRITE] = SfWrite;
 
 
 	/*	初始化控制设备的快速IO分发函数
@@ -313,6 +315,163 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
 }
 
+
+/* Warning: 需要调试*/
+NTSTATUS NTAPI SfRead(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	PFILE_OBJECT fileObject = irpsp->FileObject;
+	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+	LARGE_INTEGER offset = { 0 };
+	KEVENT	waitEvent = { 0 };
+	ULONG ulLength = 0;
+	PVOID bufferAddress = NULL;
+
+	UNREFERENCED_PARAMETER(fileObject);
+
+	// 判断如果是对文件系统控制设备的操作,直接返回失败(控制设备的读写不做处理)
+	if (IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject))
+	{
+		Irp->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
+		Irp->IoStatus.Information = 0;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return STATUS_INVALID_DEVICE_REQUEST;
+	}
+
+	// 对文件系统其他设备的操作,直接下发下层驱动
+	if (devExt->StorageStackDeviceObject)
+		return SfPassThrough(DeviceObject, Irp);
+
+	// 对卷的文件操作
+	// 获取文件读取位置偏移量、读取长度
+	offset.QuadPart = irpsp->Parameters.Read.ByteOffset.QuadPart;
+	ulLength = irpsp->Parameters.Read.Length;
+
+	KeInitializeEvent(&waitEvent, NotificationEvent, FALSE);
+	IoCopyCurrentIrpStackLocationToNext(Irp);
+	IoSetCompletionRoutine(Irp, SfReadCompletion, &waitEvent, TRUE, TRUE, TRUE);
+	ntStatus = IoCallDriver(devExt->AttachedToDeviceObject, Irp);
+	if (STATUS_PENDING == ntStatus)
+	{
+		ntStatus = KeWaitForSingleObject(&waitEvent, Executive, KernelMode, FALSE, NULL);
+		ASSERT(STATUS_SUCCESS == ntStatus);
+	}
+	if (!NT_SUCCESS(Irp->IoStatus.Status))
+		return Irp->IoStatus.Status;
+
+	// 如果成功, 获取读到的内容
+	switch (irpsp->MinorFunction)
+	{
+	case IRP_MN_NORMAL:
+	{
+		if (Irp->MdlAddress)
+			bufferAddress = MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		else
+			bufferAddress = Irp->UserBuffer;
+
+		Irp->IoStatus.Information = ulLength;
+		Irp->IoStatus.Status = STATUS_SUCCESS;
+		//Irp->FileObject->CurrentByteOffset.QuadPart = offset.QuadPart + ulLength;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return STATUS_SUCCESS;
+	}
+	case IRP_MN_MDL:
+	{
+		PMDL mdl = MyMdlMemoryAllocate(ulLength);
+		if (!mdl)
+			return STATUS_INSUFFICIENT_RESOURCES;	// 返回资源不足
+		Irp->MdlAddress = mdl;
+		Irp->IoStatus.Information = ulLength;
+		Irp->IoStatus.Status = STATUS_SUCCESS;
+		//Irp->FileObject->CurrentByteOffset.QuadPart = offset.QuadPart + ulLength;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return STATUS_SUCCESS;
+	}
+	default:
+		break;
+	}
+	IoSkipCurrentIrpStackLocation(Irp);
+	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+}
+
+NTSTATUS NTAPI SfWrite(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	PFILE_OBJECT fileObject = irpsp->FileObject;
+	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
+	LARGE_INTEGER offset = { 0 };
+	ULONG ulLength = 0;
+
+	UNREFERENCED_PARAMETER(fileObject);
+
+	// 判断如果是对文件系统控制设备的操作,直接返回失败(控制设备的读写不做处理)
+	if (IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject))
+	{
+		Irp->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
+		Irp->IoStatus.Information = 0;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return STATUS_INVALID_DEVICE_REQUEST;
+	}
+
+	// 对文件系统其他设备的操作,直接下发下层驱动
+	if (devExt->StorageStackDeviceObject)
+		return SfPassThrough(DeviceObject, Irp);
+
+	// 获取文件写入位置偏移量、写入长度
+	offset.QuadPart = irpsp->Parameters.Write.ByteOffset.QuadPart;
+	ulLength = irpsp->Parameters.Write.Length;
+
+
+	IoSkipCurrentIrpStackLocation(Irp);
+	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+}
+
+
+NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
+/*
+* 调用此例程是为了完成FsControl请求.向调度例程发送用于重新同步的事件信号
+*/
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+
+	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
+	ASSERT(NULL != Context);
+
+	// 高版本使用等待事件,低版本使用工作任务
+#if WINVER >= 0x0501
+	// 在Windows XP或更高版本上，传入的上下文将是一个要发出信号的事件
+	if (IS_WINDOWSXP_OR_LATER())
+	{
+		KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
+		return STATUS_MORE_PROCESSING_REQUIRED;
+	}
+#endif // WINVER >= 0x0501
+
+	// 对于Windows 2000,如果处于高IRQL,应该使用Context中的工作项将此工作排队到工作线程.
+	// IRQL中断级别过高时,工作任务放到DelayedWorkQueue队列执行
+	if (PASSIVE_LEVEL < KeGetCurrentIrql())
+	{
+		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, (WORK_QUEUE_TYPE)DelayedWorkQueue);
+		return STATUS_MORE_PROCESSING_REQUIRED;
+	}
+
+	// IRQL处于PASSIVE_LEVEL,直接调用工作线程
+	PWORK_QUEUE_ITEM workItem = Context;
+	workItem->WorkerRoutine(workItem->Parameter);
+
+	return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+NTSTATUS NTAPI SfReadCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	UNREFERENCED_PARAMETER(Context);
+	return STATUS_SUCCESS;
+}
+
 VOID NTAPI SfFsNotification(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FsActive)
 {
 	UNICODE_STRING name = { 0 };
@@ -447,42 +606,6 @@ VOID NTAPI SfCleanupMountedDevice(IN PDEVICE_OBJECT DeviceObject)
 	return;
 }
 
-NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
-/*
-* 调用此例程是为了完成FsControl请求.向调度例程发送用于重新同步的事件信号
-*/
-{
-	UNREFERENCED_PARAMETER(DeviceObject);
-	UNREFERENCED_PARAMETER(Irp);
-
-	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
-	ASSERT(NULL != Context);
-
-	// 高版本使用等待事件,低版本使用工作任务
-#if WINVER >= 0x0501
-	// 在Windows XP或更高版本上，传入的上下文将是一个要发出信号的事件
-	if (IS_WINDOWSXP_OR_LATER())
-	{
-		KeSetEvent((PKEVENT)Context, IO_NO_INCREMENT, FALSE);
-		return STATUS_MORE_PROCESSING_REQUIRED;
-	}
-#endif // WINVER >= 0x0501
-
-	// 对于Windows 2000,如果处于高IRQL,应该使用Context中的工作项将此工作排队到工作线程.
-	// IRQL中断级别过高时,工作任务放到DelayedWorkQueue队列执行
-	if (PASSIVE_LEVEL < KeGetCurrentIrql())
-	{
-		ExQueueWorkItem((PWORK_QUEUE_ITEM)Context, (WORK_QUEUE_TYPE)DelayedWorkQueue);
-		return STATUS_MORE_PROCESSING_REQUIRED;
-	}
-
-	// IRQL处于PASSIVE_LEVEL,直接调用工作线程
-	PWORK_QUEUE_ITEM workItem = Context;
-	workItem->WorkerRoutine(workItem->Parameter);
-
-	return STATUS_MORE_PROCESSING_REQUIRED;
-}
-
 NTSTATUS NTAPI SfFsControlLoadFileSystem(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp)
 /*
 * IRP IRP_MN_LOAD_FILE_SYSTEM 回调函数,数据包只是通过,直接下发,但是需要对设备栈进行处理
@@ -594,6 +717,7 @@ NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVIC
 		KeDelayExecutionThread(KernelMode, FALSE, &interval);
 		continue;
 	}
+	//OnSfilterAttachPost(SFilterDeviceObject, DeviceObject, NULL, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), ntStatus);
 	return ntStatus;
 }
 
@@ -603,8 +727,8 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PSFILTER_DEVICE_EXTENSION devExt = DeviceObject->DeviceExtension;
 	PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	PDEVICE_OBJECT storageStackDeviceObject = irpsp->Parameters.MountVolume.Vpb->RealDevice;	// 保存Vpb->RealDevice
 	PDEVICE_OBJECT newDeviceObject = NULL;
-	PDEVICE_OBJECT storageStackDeviceObject = NULL;
 	PSFILTER_DEVICE_EXTENSION newDevExt = NULL;
 	BOOLEAN isShadowCopyVolume = 0;
 	PFSCTRL_COMPLETION_CONTEXT completionContext = NULL;
@@ -612,9 +736,6 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 	PAGED_CODE();
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
 	ASSERT(IS_DESIRED_DEVICE_TYPE(DeviceObject->DeviceType));
-
-	// 保存Vpb->RealDevice
-	storageStackDeviceObject = irpsp->Parameters.MountVolume.Vpb->RealDevice;
 
 	// 判断是否是影卷,如果不打算绑定直接下发跳过
 	ntStatus = SfIsShadowCopyVolume(storageStackDeviceObject, &isShadowCopyVolume);
@@ -770,5 +891,42 @@ VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Co
 	ASSERT(NULL != Context);
 	SfFsControlMountVolumeComplete(Context->DeviceObject, Context->Irp, Context->NewDeviceObject);
 	ExFreePoolWithTag(Context, SFLT_POOL_TAG);
+}
+
+
+// 分配MDL,缓冲区必须是预先分配好的
+_inline PMDL MyMdlAllocate(PVOID Buffer, ULONG Length)
+{
+	PMDL mdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
+	if (!mdl)
+		return NULL;
+	MmBuildMdlForNonPagedPool(mdl);
+	return mdl;
+}
+
+_inline PMDL MyMdlMemoryAllocate(ULONG Length)
+{
+	PMDL mdl = NULL;
+	PVOID buffer = ExAllocatePool(NonPagedPool, Length);
+	if (!buffer)
+		return NULL;
+	mdl = MyMdlAllocate(buffer, Length);
+	if (!mdl)
+	{
+		ExFreePool(buffer);
+		return NULL;
+	}
+	return mdl;
+}
+
+_inline VOID MyMdlMemoryFree(PMDL Mdl)
+{
+	PVOID buffer = NULL;
+	if (!Mdl)
+		return;
+	buffer = MmGetSystemAddressForMdlSafe(Mdl, NormalPagePriority);
+	if (buffer)
+		ExFreePool(Mdl);
+	IoFreeMdl(Mdl);
 }
 

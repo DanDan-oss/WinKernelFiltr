@@ -100,6 +100,7 @@ NTSTATUS NTAPI SfEnumerateFileSystemVolumes(IN PDEVICE_OBJECT FSDeviceObject, IN
 #endif
 
 
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(PAGE, SfAttachDeviceToDeviceStack)
 #pragma alloc_text(PAGE, SfIsAttachedToDevice)
