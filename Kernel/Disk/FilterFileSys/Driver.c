@@ -427,6 +427,31 @@ NTSTATUS NTAPI SfWrite(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
 }
 
+NTSTATUS NTAPI SfCreateComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	UNREFERENCED_PARAMETER(Context);
+	//PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+	//PFILE_OBJECT fileObject = irpsp->FileObject;
+	//if (NT_SUCCESS(Irp->IoStatus.Status))
+	//{	// 如果IRP请求成功了,把这个FileObject记录到集合里,这是一个刚刚打开或生成的目录
+	//	// irpsp->Parameters.Create.Options & FILE_DIRECTORY_FILE和irpsp->Parameters.Create.Options & FILE_NONDIRECTORY_FILE均为0的情况下,Windows是否有打开一个文件对象的可能?
+	//	if ((fileObject) && (irpsp->Parameters.Create.Options & FILE_DIRECTORY_FILE))
+	//		MyAddObjectToSet(fileObject);
+	//}
+	//return Irp->IoStatus.Status;
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS NTAPI SfCleanupCloseComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
+{
+	UNREFERENCED_PARAMETER(DeviceObject);
+	UNREFERENCED_PARAMETER(Irp);
+	UNREFERENCED_PARAMETER(Context);
+	return STATUS_SUCCESS;
+}
 
 NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context)
 /*
@@ -893,6 +918,81 @@ VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Co
 	ExFreePoolWithTag(Context, SFLT_POOL_TAG);
 }
 
+PUNICODE_STRING SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl)
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	POBJECT_NAME_INFORMATION nameInfo = NULL;
+	ULONG size = 0;
+	ULONG bufferSize = 0;
+	nameInfo = (POBJECT_NAME_INFORMATION)NameControl->SmallBuffer;
+	bufferSize = sizeof(NameControl->SmallBuffer);
+
+	// 如果打开成功,则获取文件名; 如果打开失败,则获取设备名
+	ntStatus = ObQueryNameString((NT_SUCCESS(CreateStatus) ? (PVOID)FileObject : (PVOID)FileObject->DeviceObject), nameInfo, bufferSize, &size);
+	if (STATUS_BUFFER_OVERFLOW == ntStatus)
+	{
+		bufferSize = size + sizeof(WCHAR);
+		NameControl->AllocatedBuffer = ExAllocatePoolWithTag(NonPagedPool, bufferSize, SFLT_POOL_TAG);
+		if (!NameControl->AllocatedBuffer)
+		{
+			RtlInitEmptyUnicodeString((PUNICODE_STRING)&NameControl->SmallBuffer, (PWCHAR)(NameControl->SmallBuffer + sizeof(UNICODE_STRING)), (USHORT)(sizeof(NameControl->SmallBuffer) - sizeof(UNICODE_STRING)));
+			return (PUNICODE_STRING)&NameControl->SmallBuffer;
+		}
+		// 设置已分配的缓冲区并重新获取名称
+		nameInfo = (POBJECT_NAME_INFORMATION)NameControl->AllocatedBuffer;
+		ntStatus = ObQueryNameString(FileObject, nameInfo, bufferSize, &size);
+	}
+
+	/*
+	* 如果获取到一个名字并且在打开文件时错误,那么我们只收到了设备名称
+	* 从FileObject中获取名称的其余部分(注意,只有在从Create中调用时才能执行此操作),只有当我们从创建中返回错误时,才会发生这种情况
+	*/
+	if (NT_SUCCESS(ntStatus) && !NT_SUCCESS(CreateStatus))
+	{
+		ULONG newSize = 0;
+		PCHAR newBuffer = NULL;
+		POBJECT_NAME_INFORMATION newNameInfo = NULL;
+
+		// 计算名字缓冲区大小
+		newSize = size + FileObject->FileName.Length;
+		if (FileObject->RelatedFileObject)
+			newSize += FileObject->RelatedFileObject->FileName.Length + sizeof(WCHAR);
+		if (newSize > bufferSize)
+		{
+			newBuffer = ExAllocatePoolWithTag(NonPagedPool, newSize, SFLT_POOL_TAG);
+			if (!newBuffer)
+			{
+				RtlInitEmptyUnicodeString((PUNICODE_STRING)&NameControl->SmallBuffer, (PWCHAR)(NameControl->SmallBuffer + sizeof(UNICODE_STRING)), (USHORT)(sizeof(NameControl->SmallBuffer) - sizeof(UNICODE_STRING)));
+				return (PUNICODE_STRING)&NameControl->SmallBuffer;
+			}
+			newNameInfo = (POBJECT_NAME_INFORMATION)newBuffer;
+			RtlInitEmptyUnicodeString(&newNameInfo->Name, (PWCHAR)(newBuffer + sizeof(OBJECT_NAME_INFORMATION)), (USHORT)(newSize - sizeof(OBJECT_NAME_INFORMATION)));
+			RtlCopyUnicodeString(&newNameInfo->Name, &nameInfo->Name);
+
+			// 如果已申请缓冲区,就释放旧缓冲区. 并保存新分配的缓冲区地址
+			if (NameControl->AllocatedBuffer)
+				ExFreePool(NameControl->AllocatedBuffer);
+			NameControl->AllocatedBuffer = newBuffer;
+			bufferSize = newSize;
+			nameInfo = newNameInfo;
+		} else
+		{
+			nameInfo->Name.MaximumLength = (USHORT)(bufferSize - sizeof(OBJECT_NAME_INFORMATION));
+		}
+
+		// 如果存在相关的文件对象,先将该名称与分隔符一起附加到设备对象上
+		if (FileObject->RelatedFileObject)
+		{
+			RtlAppendUnicodeStringToString(&nameInfo->Name, &FileObject->RelatedFileObject->FileName);
+			RtlAppendUnicodeToString(&nameInfo->Name, L"\\");
+		}
+
+		// 附加对象名称
+		RtlAppendUnicodeStringToString(&nameInfo->Name, &FileObject->FileName);
+		ASSERT(nameInfo->Name.Length <= nameInfo->Name.MaximumLength);
+	}
+	return &nameInfo->Name;
+}
 
 // 分配MDL,缓冲区必须是预先分配好的
 _inline PMDL MyMdlAllocate(PVOID Buffer, ULONG Length)

@@ -50,7 +50,8 @@ extern ULONG g_SfDebug;
         ( (((_type)>0) && ((_type)< (sizeof(g_DeviceTypeNames) / sizeof(PCHAR)))) ? \
         (g_DeviceTypeNames[ (_type) ]) : ("[Unknown]") )
 
-typedef struct _SFILTER_DEVICE_EXTENSION {
+typedef struct _SFILTER_DEVICE_EXTENSION 
+{
 
     ULONG TypeFlag;
     PDEVICE_OBJECT AttachedToDeviceObject;			// 指向附加的文件系统设备对象的指针
@@ -68,6 +69,12 @@ typedef struct _FSCTRL_COMPLETION_CONTEXT
     PDEVICE_OBJECT NewDeviceObject;             // 我们已经分配并部分初始化的新设备对象，如果装载成功，我们将附加到已装载的卷
 }FSCTRL_COMPLETION_CONTEXT, *PFSCTRL_COMPLETION_CONTEXT;
 
+typedef struct _GET_NAME_CONTROL 
+{
+    PCHAR AllocatedBuffer;
+    CHAR SmallBuffer[256];
+}GET_NAME_CONTROL, *PGET_NAME_CONTROL;
+
 NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 VOID NTAPI DriverUnload(PDRIVER_OBJECT DriverObject);
 
@@ -81,6 +88,8 @@ NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 NTSTATUS NTAPI SfRead(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 NTSTATUS NTAPI SfWrite(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 
+NTSTATUS NTAPI SfCreateComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context);
+NTSTATUS NTAPI SfCleanupCloseComplete(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context);
 NTSTATUS NTAPI SfFsControlCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context);
 NTSTATUS NTAPI SfReadCompletion(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp, IN PVOID Context);
 
@@ -99,6 +108,8 @@ NTSTATUS NTAPI SfFsControlMountVolume(IN PDEVICE_OBJECT DeviceObject, IN PIRP Ir
 NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, OUT PBOOLEAN IsShadowCopy);
 NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PDEVICE_OBJECT NewDeviceObject);
 VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
+
+PUNICODE_STRING SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl);
 
 
 _inline PMDL MyMdlAllocate(PVOID Buffer, ULONG Length);
