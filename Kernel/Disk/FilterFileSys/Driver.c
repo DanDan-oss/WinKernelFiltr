@@ -2,6 +2,12 @@
 #include "FastIo.h"
 #include "Driver.h"
 
+#define SFLT_POOL_TAG   'tlFS'
+#define MEM_TAG 'mymt'
+
+#define MY_DEV_MAX_PATH 128 // Add by Tan Wen.
+#define MY_DEV_MAX_NAME 128 // Add by Tan Wen.
+
 PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
 FAST_MUTEX g_SfilterAttachLock = {0};
@@ -86,9 +92,25 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PFAST_IO_DISPATCH fastIoDispatch = NULL;
 	UNICODE_STRING nameString = { 0 };
+	UNICODE_STRING path2K = { 0 };
+	UNICODE_STRING pathXP = { 0 };
+	WCHAR nameBuffer[MY_DEV_MAX_PATH] = { 0 };
+	WCHAR userNameBuffer[MY_DEV_MAX_NAME] = { 0 };
+	WCHAR syblnkBuffer[MY_DEV_MAX_NAME] = { 0 };
+	WCHAR dosDeviceBuffer[MY_DEV_MAX_NAME] = { 0 };
+	UNICODE_STRING userNameString = { 0 };
+	UNICODE_STRING syblnkString = { 0 };
+	UNICODE_STRING dosDevicePrefix = { 0 };
+	UNICODE_STRING dosDevice = { 0 };
 
 	PDEVICE_OBJECT rawDeviceObject = NULL;
 	PFILE_OBJECT fileObject = NULL;
+
+#if WINVER >= 0x501
+	if (g_SfDynamicFunctions.EnumerateDeviceObjectList)
+		g_SFilterDriverObject->DriverUnload = DriverUnload;
+#endif // WINVER >= 0x501
+
 
 	RtlInitUnicodeString(&nameString, L"\\FileSystem\\Filters\\SFilter");
 	ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_DISK_FILE_SYSTEM, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
@@ -918,7 +940,7 @@ VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Co
 	ExFreePoolWithTag(Context, SFLT_POOL_TAG);
 }
 
-PUNICODE_STRING SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl)
+PUNICODE_STRING NTAPI SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl)
 {
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	POBJECT_NAME_INFORMATION nameInfo = NULL;
@@ -993,6 +1015,74 @@ PUNICODE_STRING SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStat
 	}
 	return &nameInfo->Name;
 }
+
+ULONG NTAPI SfFileFullPathPreCreate(IN PFILE_OBJECT File, IN PUNICODE_STRING Path)
+{
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	PVOID objectPtr = NULL;
+	POBJECT_NAME_INFORMATION objectNameInfo = NULL;
+	ULONG length = 0;
+	BOOLEAN needSplist = FALSE;
+	WCHAR wcBuffer[64] = { 0 };
+
+	ASSERT(File != NULL);
+	if (!File)
+		return 0;
+	if (!File->FileName.Buffer)
+		return 0;
+	objectNameInfo = (POBJECT_NAME_INFORMATION)wcBuffer;
+	do
+	{
+		// 获取FileName前面的部分,(设备路径或者根目录路径
+		if (File->RelatedFileObject)
+			objectPtr = (void*)File->RelatedFileObject;
+		else
+			objectPtr = (void*)File->DeviceObject;
+		ntStatus = ObQueryNameString(objectPtr, objectNameInfo, 64 * sizeof(WCHAR), &length);
+		if (STATUS_INFO_LENGTH_MISMATCH == ntStatus)
+		{
+			objectNameInfo = ExAllocatePoolWithTag(NonPagedPool, length, MEM_TAG);
+			if (!objectNameInfo)
+				return STATUS_INSUFFICIENT_RESOURCES;
+			RtlZeroMemory(objectNameInfo, length);
+			ntStatus = ObQueryNameString(objectPtr, objectNameInfo, length, &length);
+		}
+		if (!NT_SUCCESS(ntStatus))
+			break;
+
+		// 判断路径之间是否余姚多加一个'\'. 如果FileName第一个字符不是'\'且objectNameInfo最后一个字符不是'\',则需要添加
+		if (File->FileName.Length > 2 && File->FileName.Buffer[0] != L"\\" && \
+			L'\\' != objectNameInfo->Name.Buffer[objectNameInfo->Name.Length / sizeof(WCHAR) - 1])
+		{
+			needSplist = TRUE;
+		}
+
+		// 获取总体名字长度,如果长度不足,直接返回
+		length = objectNameInfo->Name.Length + File->FileName.Length;
+		if (needSplist)
+			length += sizeof(WCHAR);
+		if (Path->MaximumLength < length)
+			break;
+
+		// 拷贝设备名
+		RtlCopyUnicodeString(Path, &objectNameInfo->Name);
+		if (needSplist)
+			RtlAppendUnicodeToString(Path, L"\\");
+		RtlAppendUnicodeStringToString(Path, &File->FileName);
+	} while (FALSE);
+	if ((PVOID)objectNameInfo != wcBuffer)
+		ExFreePool(objectNameInfo);
+	return length;
+}
+
+ULONG NTAPI SfFilePathShortToLong(IN PUNICODE_STRING FileNameShort, OUT PUNICODE_STRING FileNameLong)
+/*
+	将文件短名称转换成长名称
+*/
+{
+
+}
+
 
 // 分配MDL,缓冲区必须是预先分配好的
 _inline PMDL MyMdlAllocate(PVOID Buffer, ULONG Length)

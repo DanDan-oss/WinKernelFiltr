@@ -3,7 +3,6 @@
 
 #include <ntddk.h>
 
-#define SFLT_POOL_TAG   'tlFS'
 #define MAX_DEVNAME_LENGTH 64	// 本地设备名称最大
 
 #define SFDEBUG_DISPLAY_ATTACHMENT_NAMES    0x00000001      // 显示附加到的设备对象的名称
@@ -109,7 +108,9 @@ NTSTATUS NTAPI SfIsShadowCopyVolume(IN PDEVICE_OBJECT StorageStackDeviceObject, 
 NTSTATUS NTAPI SfFsControlMountVolumeComplete(IN PDEVICE_OBJECT DeviceObject,IN PIRP Irp,IN PDEVICE_OBJECT NewDeviceObject);
 VOID NTAPI SfFsControlMountVolumeCompleteWorker(IN PFSCTRL_COMPLETION_CONTEXT Context);
 
-PUNICODE_STRING SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl);
+PUNICODE_STRING NTAPI SfGetFileName(IN PFILE_OBJECT FileObject, IN NTSTATUS CreateStatus, IN OUT PGET_NAME_CONTROL NameControl);
+ULONG NTAPI SfFileFullPathPreCreate(IN PFILE_OBJECT File, IN PUNICODE_STRING Path);
+ULONG NTAPI SfFilePathShortToLong(IN PUNICODE_STRING FileNameShort, OUT PUNICODE_STRING FileNameLong);
 
 
 _inline PMDL MyMdlAllocate(PVOID Buffer, ULONG Length);
