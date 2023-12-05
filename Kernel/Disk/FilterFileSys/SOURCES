@@ -1,0 +1,7 @@
+TARGETNAME=Sfilter
+TARGETPATH=obj
+TARGETTYPE=LIBRARY
+DRIVERTYPE=FS
+SOURCES=Driver.c \
+		FastIo.c \
+		SFilter.c

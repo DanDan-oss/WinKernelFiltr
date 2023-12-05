@@ -4,6 +4,8 @@
 #include <ntifs.h>
 #include <ntddk.h>
 
+
+
 #if WINVER == 0x0500
 #ifndef FlagOn
 #define FlagOn(_F,_SF)       ((_F) & (_SF))
@@ -98,7 +100,11 @@ NTSTATUS NTAPI OnSfilterDriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_
 NTSTATUS NTAPI SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext);
 VOID NTAPI SfPostFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, IN NTSTATUS OperationStatus, IN PVOID CompletionContext);
 NTSTATUS NTAPI SfEnumerateFileSystemVolumes(IN PDEVICE_OBJECT FSDeviceObject, IN PUNICODE_STRING FSName);
+VOID SfLoadDynamicFunctions();
+VOID SfGetCurrentVersion();
 #endif
+
+VOID NTAPI SfReadDriverParameters(IN PUNICODE_STRING RegistryPath);
 
 
 

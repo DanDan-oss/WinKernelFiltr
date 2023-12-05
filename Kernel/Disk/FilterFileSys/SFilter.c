@@ -6,9 +6,6 @@ SF_DYNAMIC_FUNCTION_POINTERS g_SfDynamicFunctions = { 0 };
 ULONG g_SfOsMajorVersion = 0;
 ULONG g_SfOsMinorVersion = 0;
 
-#endif
-
-
 NTSTATUS NTAPI SfPreFsFilterPassThrough(IN PFS_FILTER_CALLBACK_DATA Data, OUT PVOID* CompletionContext)
 {
 	UNREFERENCED_PARAMETER(Data);
@@ -29,6 +26,18 @@ NTSTATUS NTAPI SfEnumerateFileSystemVolumes(IN PDEVICE_OBJECT FSDeviceObject, IN
 	UNREFERENCED_PARAMETER(FSName);
 	return STATUS_SUCCESS;
 }
+
+VOID SfLoadDynamicFunctions()
+{
+
+}
+
+VOID SfGetCurrentVersion()
+{
+
+}
+
+#endif
 
 NTSTATUS NTAPI SfAttachDeviceToDeviceStack(IN PDEVICE_OBJECT SourceDevice, IN PDEVICE_OBJECT TargetDevice, IN OUT PDEVICE_OBJECT* AttachedToDeviceObject)
 {
@@ -77,4 +86,19 @@ BOOLEAN NTAPI SfIsAttachedToDeviceWXPAndLater(PDEVICE_OBJECT DeviceObject, PDEVI
 	UNREFERENCED_PARAMETER(DeviceObject);
 	UNREFERENCED_PARAMETER(AttachedDeviceObject);
 	return TRUE;
+}
+
+VOID NTAPI SfReadDriverParameters(IN PUNICODE_STRING RegistryPath)
+{
+	UNREFERENCED_PARAMETER(RegistryPath);
+}
+
+NTSTATUS NTAPI OnSfilterDriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_STRING RegistryPath, OUT PUNICODE_STRING userNameString, OUT PUNICODE_STRING syblnkString, OUT PULONG extensionSize)
+{
+	UNREFERENCED_PARAMETER(DriverObject);
+	UNREFERENCED_PARAMETER(RegistryPath);
+	UNREFERENCED_PARAMETER(userNameString);
+	UNREFERENCED_PARAMETER(syblnkString);
+	UNREFERENCED_PARAMETER(extensionSize);
+	return STATUS_SUCCESS;
 }

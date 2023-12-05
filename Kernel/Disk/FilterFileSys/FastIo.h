@@ -3,6 +3,9 @@
 
 #include <ntddk.h>
 
+
+#define SFLT_POOL_TAG   'tlFS'
+
 // 判断 FAST_IO_DISPATCH处理函数是否有效的宏
 #define VALID_FAST_IO_DISPATCH_HANDLER(_FastIoDispatchPtr, _FastFuncName) \
 	(((_FastIoDispatchPtr) != NULL) && \
@@ -70,7 +73,9 @@ BOOLEAN NTAPI SfFastIoMdlReadCompleteCompressed(IN PFILE_OBJECT FileObject, IN P
 
 BOOLEAN NTAPI SfFastIoMdlWriteCompleteCompressed(IN PFILE_OBJECT FileObject, IN PLARGE_INTEGER FileOffset, IN PMDL MdlChain, IN PDEVICE_OBJECT DeviceObject);
 
+
 BOOLEAN NTAPI SfFastIoQueryOpen(IN PIRP Irp, OUT PFILE_NETWORK_OPEN_INFORMATION NetworkInformation, IN PDEVICE_OBJECT DeviceObject);
+
 
 
 

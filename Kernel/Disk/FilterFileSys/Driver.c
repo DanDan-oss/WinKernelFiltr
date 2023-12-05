@@ -1,8 +1,8 @@
 #include "SFilter.h"
 #include "FastIo.h"
 #include "Driver.h"
+#include <wdmsec.h>
 
-#define SFLT_POOL_TAG   'tlFS'
 #define MEM_TAG 'mymt'
 
 #define MY_DEV_MAX_PATH 128 // Add by Tan Wen.
@@ -12,6 +12,9 @@ PDEVICE_OBJECT g_SFilterControlDeviceObject = 0;
 PDRIVER_OBJECT g_SFilterDriverObject = NULL;
 FAST_MUTEX g_SfilterAttachLock = {0};
 ULONG g_SfDebug = 0;
+static ULONG g_UserExtensionSize = 0;
+static BOOLEAN g_cdo_for_all_users = FALSE;
+const GUID DECLSPEC_SELECTANY SFGUID_CLASS_MYCDO ={ 0x26e0d1e0L, 0x8189, 0x12e0, {0x99,0x14, 0x08, 0x00, 0x22, 0x30, 0x19, 0x03} };
 
 static CONST PCHAR g_DeviceTypeNames[] = {
 	"",
@@ -88,7 +91,6 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 *   第五步: 使用IoRegisterFsRegistrationChange函数注册系统变动回调函数
 */
 {
-	UNREFERENCED_PARAMETER(RegistryPath);
 	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 	PFAST_IO_DISPATCH fastIoDispatch = NULL;
 	UNICODE_STRING nameString = { 0 };
@@ -106,18 +108,34 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 	PDEVICE_OBJECT rawDeviceObject = NULL;
 	PFILE_OBJECT fileObject = NULL;
 
+/*
+#if DBG
+	__asm int 3;
+#endif // DBG
+*/
+#if WINVER >= 0x501
+	// 尝试加载动态函数
+	SfLoadDynamicFunctions();
+	SfGetCurrentVersion();
+#endif // WINVER >= 0x501
+
+	SfReadDriverParameters(RegistryPath);
+	g_SFilterDriverObject = DriverObject;
+
 #if WINVER >= 0x501
 	if (g_SfDynamicFunctions.EnumerateDeviceObjectList)
 		g_SFilterDriverObject->DriverUnload = DriverUnload;
 #endif // WINVER >= 0x501
 
+	ExInitializeFastMutex(&g_SfilterAttachLock);
 
+	/*
 	RtlInitUnicodeString(&nameString, L"\\FileSystem\\Filters\\SFilter");
 	ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_DISK_FILE_SYSTEM, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
 
 	// 控制设备生成失败
 	if (!NT_SUCCESS(ntStatus))
-	{	
+	{
 		// 如果生成路径 \\FileSystem\\Filters\\SFilter 未找到说明可能是路径原因生成失败
 		if (STATUS_OBJECT_PATH_NOT_FOUND != ntStatus)
 		{
@@ -133,6 +151,74 @@ NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Registry
 			KdPrint(("[dbg]![%ws]: Error creating control device object \"%wZ\", status =%08x\n ", __FUNCTIONW__, &nameString, ntStatus));
 			return ntStatus;
 		}
+	}
+	*/
+
+	RtlInitEmptyUnicodeString(&nameString, nameBuffer, MY_DEV_MAX_PATH);
+	RtlInitEmptyUnicodeString(&userNameString, userNameBuffer, MY_DEV_MAX_NAME);
+	RtlInitEmptyUnicodeString(&syblnkString, syblnkBuffer, MY_DEV_MAX_NAME);
+	RtlInitUnicodeString(&pathXP, L"\\FileSystem\\Filters");
+	RtlInitUnicodeString(&path2K, L"\\FileSystem\\");
+	RtlInitUnicodeString(&dosDevicePrefix, L"\\DosDevices\\");
+	RtlInitEmptyUnicodeString(&dosDevice, dosDeviceBuffer, MY_DEV_MAX_NAME);
+	RtlCopyUnicodeString(&dosDevice, &dosDevicePrefix);
+
+	ntStatus = OnSfilterDriverEntry(DriverObject, RegistryPath, &userNameString, &syblnkString, &g_UserExtensionSize);
+	if (!NT_SUCCESS(ntStatus))
+		return ntStatus;
+	RtlCopyUnicodeString(&nameString, &pathXP);
+	RtlAppendUnicodeStringToString(&nameString, &userNameString);
+
+	// 这是生成控制设备。
+	if (g_cdo_for_all_users)
+	{
+		ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
+	}
+	else
+	{
+		/*
+		* 以下生成一个可以被任何用户打开读写的设备。但是guid手写固定的。
+		* 不清楚如果在有多个基于本sfilter模块的驱动同时安装的时候，会不会导致出现guid重复的问题。
+		*/
+		UNICODE_STRING sddlString = { 0 };
+		RtlInitUnicodeString(&sddlString, L"D:P(A;;GA;;;WD)");
+		ntStatus = IoCreateDeviceSecure(DriverObject, 0, &nameString, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &sddlString, (LPCGUID)&SFGUID_CLASS_MYCDO, &g_SFilterControlDeviceObject);
+	}
+
+	if (STATUS_OBJECT_PATH_NOT_FOUND == ntStatus)
+	{
+		RtlInitEmptyUnicodeString(&nameString, nameBuffer, MY_DEV_MAX_PATH);
+		RtlCopyUnicodeString(&nameString, &path2K);
+		RtlAppendUnicodeStringToString(&nameString, &userNameString);
+		// 再次尝试生成控制设备
+		if (g_cdo_for_all_users)
+		{
+			ntStatus = IoCreateDevice(DriverObject, 0, &nameString, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_SFilterControlDeviceObject);
+		}
+		else
+		{
+			UNICODE_STRING sddlString = { 0 };
+			RtlInitUnicodeString(&sddlString, L"D:P(A;;GA;;;WD)");
+			ntStatus = IoCreateDeviceSecure(DriverObject, 0, &nameString, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &sddlString, (LPCGUID)&SFGUID_CLASS_MYCDO, &g_SFilterControlDeviceObject);
+		}
+
+	}
+
+	if (!NT_SUCCESS(ntStatus))
+	{
+		KdPrint(("[dbg]![%ws]: Error creating control device object \"%wZ\", status=%08x\n", __FUNCTIONW__, &nameString, ntStatus));
+		return ntStatus;
+	}
+
+	RtlAppendUnicodeStringToString(&dosDevice, &syblnkString);
+	IoDeleteSymbolicLink(&dosDevice);
+	ntStatus = IoCreateSymbolicLink(&dosDevice, &nameString);
+	
+	if (!NT_SUCCESS(ntStatus))
+	{
+		KdPrint(("[dbg]![%ws]: Error creating syblnk object \"%wZ\", status=%08x\n", __FUNCTIONW__, &syblnkString, ntStatus));
+		IoDeleteDevice(DriverObject->DeviceObject);
+		return ntStatus;
 	}
 
 	// 初始化控制设备的普通IRP分发函数
@@ -1043,7 +1129,7 @@ ULONG NTAPI SfFileFullPathPreCreate(IN PFILE_OBJECT File, IN PUNICODE_STRING Pat
 		{
 			objectNameInfo = ExAllocatePoolWithTag(NonPagedPool, length, MEM_TAG);
 			if (!objectNameInfo)
-				return STATUS_INSUFFICIENT_RESOURCES;
+				return (ULONG)STATUS_INSUFFICIENT_RESOURCES;
 			RtlZeroMemory(objectNameInfo, length);
 			ntStatus = ObQueryNameString(objectPtr, objectNameInfo, length, &length);
 		}
@@ -1051,7 +1137,7 @@ ULONG NTAPI SfFileFullPathPreCreate(IN PFILE_OBJECT File, IN PUNICODE_STRING Pat
 			break;
 
 		// 判断路径之间是否余姚多加一个'\'. 如果FileName第一个字符不是'\'且objectNameInfo最后一个字符不是'\',则需要添加
-		if (File->FileName.Length > 2 && File->FileName.Buffer[0] != L"\\" && \
+		if (File->FileName.Length > 2 && File->FileName.Buffer[0] != L'\\' && \
 			L'\\' != objectNameInfo->Name.Buffer[objectNameInfo->Name.Length / sizeof(WCHAR) - 1])
 		{
 			needSplist = TRUE;
@@ -1080,7 +1166,9 @@ ULONG NTAPI SfFilePathShortToLong(IN PUNICODE_STRING FileNameShort, OUT PUNICODE
 	将文件短名称转换成长名称
 */
 {
-
+	UNREFERENCED_PARAMETER(FileNameShort);
+	UNREFERENCED_PARAMETER(FileNameLong);
+	return STATUS_SUCCESS;
 }
 
 
