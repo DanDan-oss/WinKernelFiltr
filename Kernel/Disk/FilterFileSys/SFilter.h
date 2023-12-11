@@ -4,7 +4,12 @@
 #include <ntifs.h>
 #include <ntddk.h>
 
-
+typedef enum
+{
+    SF_IRP_GO_ON = 0,       // 本驱动要继续处理这个IRP,下发后,完成处理回调函数OnSfilterIrpPost会被调用,
+    SF_IRP_COMPLETED = 1,   // 驱动已经完成了该请求,下面不会再继续发送该请求
+    SF_IRP_PASS = 2,        // 表示这个IRP将下发,并且不再调用完成后的处理函数
+}SF_RET;
 
 #if WINVER == 0x0500
 #ifndef FlagOn
@@ -104,8 +109,11 @@ VOID SfLoadDynamicFunctions();
 VOID SfGetCurrentVersion();
 #endif
 
-VOID NTAPI SfReadDriverParameters(IN PUNICODE_STRING RegistryPath);
-
+VOID NTAPI NTAPI SfReadDriverParameters(IN PUNICODE_STRING RegistryPath);
+BOOLEAN NTAPI OnSfilterAttachPre(IN PDEVICE_OBJECT OurDevice, IN PDEVICE_OBJECT TheDeviceToAttach, IN PUNICODE_STRING DeviceName, IN PVOID Extension);
+VOID NTAPI OnSfilterAttachPost(IN PDEVICE_OBJECT OurDevice, IN PDEVICE_OBJECT TheDeviceToAttach, IN PDEVICE_OBJECT TheDeviceToAttached, IN PVOID Extension, IN NTSTATUS Status);
+SF_RET NTAPI OnSfilterIrpPre(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT NextObject, IN PVOID Externsion, IN PIRP Irp, OUT NTSTATUS* Status, PVOID* Context);
+VOID NTAPI OnSfilterIrpPost(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT NextObject, IN PVOID Extension, IN PIRP Irp, IN NTSTATUS Status, PVOID Context);
 
 
 #ifdef ALLOC_PRAGMA

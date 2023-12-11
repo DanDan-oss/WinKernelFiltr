@@ -102,3 +102,36 @@ NTSTATUS NTAPI OnSfilterDriverEntry(IN PDRIVER_OBJECT DriverObject, IN PUNICODE_
 	UNREFERENCED_PARAMETER(extensionSize);
 	return STATUS_SUCCESS;
 }
+
+BOOLEAN NTAPI OnSfilterAttachPre(IN PDEVICE_OBJECT OurDevice, IN PDEVICE_OBJECT TheDeviceToAttach, IN PUNICODE_STRING DeviceName, IN PVOID Extension)
+/*
+* OurDevice: 已经生成好的过滤设备
+* TheDeviceToAttach: 要被绑定的真是设备
+* DeviceName: 设备名,用于更好的判断要不要绑定
+* Extension: 设备扩展指针,在OnSfilterDriverEntry中决定设备扩展的大小
+*/
+{
+	
+}
+
+VOID NTAPI OnSfilterAttachPost(IN PDEVICE_OBJECT OurDevice, IN PDEVICE_OBJECT TheDeviceToAttach, IN PDEVICE_OBJECT TheDeviceToAttached, IN PVOID Extension, IN NTSTATUS Status)
+/*
+* OurDevice: 已经生成好的过滤设备
+* TheDeviceToAttach: 要被绑定的真是设备
+* DeviceName: 设备名,用于更好的判断要不要绑定
+* Extension: 设备扩展指针,在OnSfilterDriverEntry中决定设备扩展的大小
+* Status: 绑定状态, 如果STATUS_SUCCESS则绑定成功
+*/
+{
+
+}
+
+SF_RET NTAPI OnSfilterIrpPre(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT NextObject, IN PVOID Externsion, IN PIRP Irp, OUT NTSTATUS* Status, PVOID* Context)
+{
+
+}
+
+VOID NTAPI OnSfilterIrpPost(IN PDEVICE_OBJECT DeviceObject, IN PDEVICE_OBJECT NextObject, IN PVOID Extension, IN PIRP Irp, IN NTSTATUS Status, PVOID Context)
+{
+
+}

@@ -377,15 +377,77 @@ NTSTATUS NTAPI SfCleanupClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 }
 
 NTSTATUS NTAPI SfPassThrough(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+/*
+* 此函数是通用文件的主调度函数,它只是将请求传递给中的下一个驱动程序堆栈，可能是一个磁盘文件系统
+* 
+* 文件系统筛选器实现者注意事项:
+* 这个例程实际上通过以下方式"通过"请求IRP堆栈中的驱动程序。如果驱动想通过I/O请求通过，然后看到结果，
+* 并且不是将自己从循环中移除. 它可以通过复制调用方的参数到下一个堆栈位置，然后设置自己的参数完成函数
+* 因此可以将
+* IoSkipCurrentIrpStackLocation(Irp)
+* 替换为下面的更具性价比
+* IoCopyCurrentIrpStackLocationToNext(Irp);
+* IoSetCompletionRoutine(Irp,NULL,NULL,FALSE,FALSE,FALSE);
+*/
 {
-	// ASSERT宏只在DeBug版本中编译时才有意义,在Release版本中编译时不起任何作用
-	// 在DeBug版本中,如果没有调试器,而且不满足ASSERT中的条件,则会出现蓝屏. 如果有调试器,则会弹出错误相关的信息
-	ASSERT(!IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject));
 	ASSERT(IS_MY_DEVICE_OBJECT(DeviceObject));
 
-	// 不做处理,直接下发
-	IoSkipCurrentIrpStackLocation(Irp);
-	return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+	NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+	SF_RET sfRet = 0;
+	PVOID context = NULL;
+	PAGED_CODE();
+
+	// 判断 CDO请求
+	if (IS_MY_CONTROL_DEVICE_OBJECT(DeviceObject))
+	{
+		ntStatus = OnSfilterCDODispatch(DeviceObject, Irp);
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return ntStatus;
+	}
+	if (!IS_MY_DEVICE_OBJECT(DeviceObject))
+	{
+		sfRet = OnSfilterIrpPre(DeviceObject, NULL, NULL, Irp, &ntStatus, &context);
+		ASSERT(context == NULL);
+		ASSERT(sfRet == SF_IRP_COMPLETED);
+		return ntStatus;
+	}
+
+	// 对于本地文件系统我们只过滤卷设备
+	if ((FILE_DEVICE_DISK_FILE_SYSTEM == DeviceObject->DeviceType) && \
+		(NULL == ((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->StorageStackDeviceObject))
+	{  // 不做处理,直接下发
+		IoSkipCurrentIrpStackLocation(Irp);
+		return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+	}
+
+	sfRet = OnSfilterIrpPre(DeviceObject, ((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, \
+		(PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), Irp, &ntStatus, &context);
+	switch (sfRet)
+	{
+	case SF_IRP_PASS: // 不做处理,直接下发
+		IoSkipCurrentIrpStackLocation(Irp);
+		return IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+	case SF_IRP_COMPLETED: //直接返回 
+		return ntStatus;
+	default: {
+		KEVENT waitEvent = { 0 };
+		KeInitializeEvent(&waitEvent, NotificationEvent, FALSE);
+		IoCopyCurrentIrpStackLocationToNext(Irp);
+		IoSetCompletionRoutine(Irp, SfCreateComplete, &waitEvent, TRUE, TRUE, TRUE);
+		ntStatus = IoCallDriver(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, Irp);
+		if (STATUS_PENDING == ntStatus)
+		{
+			NTSTATUS localStatus = KeWaitForSingleObject(&waitEvent, Executive, KernelMode, FALSE, NULL);
+			ASSERT(STATUS_SUCCESS == localStatus);
+		}
+		ASSERT(!NT_SUCCESS(Irp->IoStatus.Status) || KeReadStateEvent(&waitEvent));
+		OnSfilterIrpPost(DeviceObject, ((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->AttachedToDeviceObject, \
+			(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), Irp, ntStatus, context);
+		ntStatus = Irp->IoStatus.Status;
+		IoCompleteRequest(Irp, IO_NO_INCREMENT);
+		return ntStatus;
+		}
+	}
 }
 
 NTSTATUS NTAPI SfFsControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
@@ -678,6 +740,9 @@ NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUN
 	if (!NT_SUCCESS(ntStatus))
 		return ntStatus;
 
+	if (!OnSfilterAttachPre(newDeviceObject, DeviceObject, &fsName, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension)))
+		return STATUS_UNSUCCESSFUL;
+
 	// 复制各种设备属性标志
 	if (FlagOn(DeviceObject->Flags, DO_BUFFERED_IO))
 		SetFlag(newDeviceObject->Flags, DO_BUFFERED_IO);
@@ -717,12 +782,13 @@ NTSTATUS NTAPI SfAttachToFileSystemDevice(IN PDEVICE_OBJECT DeviceObject, IN PUN
 		}
 	}
 #endif // WINVER >= 0x0501
-
+	OnSfilterAttachPost(newDeviceObject, DeviceObject, devExt->AttachedToDeviceObject, (((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), STATUS_SUCCESS);
 	return STATUS_SUCCESS;
 
 ErrorCleanupDevice:
 	SfCleanupMountedDevice(newDeviceObject);
 	IoDeleteDevice(newDeviceObject);
+	OnSfilterAttachPost(newDeviceObject, DeviceObject, NULL, (((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), ntStatus);
 	return ntStatus;
 }
 
@@ -828,6 +894,8 @@ NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVIC
 	ASSERT(!SfIsAttachedToDevice(DeviceObject, NULL));
 #endif // WINVER >= 0x501
 
+	if (!OnSfilterAttachPre(SFilterDeviceObject, DeviceObject, NULL, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension)))
+		return STATUS_UNSUCCESSFUL;
 	// 赋值设备属性标志
 	if (FlagOn(DeviceObject->Flags, DO_BUFFERED_IO))
 		SetFlag(SFilterDeviceObject->Flags, DO_BUFFERED_IO);
@@ -841,6 +909,7 @@ NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVIC
 		ntStatus = SfAttachDeviceToDeviceStack(SFilterDeviceObject, DeviceObject, &newDevExt->AttachedToDeviceObject);
 		if (NT_SUCCESS(ntStatus))
 		{
+			OnSfilterAttachPost(SFilterDeviceObject, DeviceObject, newDevExt->AttachedToDeviceObject, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), ntStatus);
 			ClearFlag(SFilterDeviceObject->Flags, DO_DEVICE_INITIALIZING);
 			return STATUS_SUCCESS;
 		}
@@ -850,7 +919,7 @@ NTSTATUS NTAPI SfAttachToMountedDevice(IN PDEVICE_OBJECT DeviceObject, IN PDEVIC
 		KeDelayExecutionThread(KernelMode, FALSE, &interval);
 		continue;
 	}
-	//OnSfilterAttachPost(SFilterDeviceObject, DeviceObject, NULL, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), ntStatus);
+	OnSfilterAttachPost(SFilterDeviceObject, DeviceObject, NULL, (PVOID)(((PSFILTER_DEVICE_EXTENSION)DeviceObject->DeviceExtension)->UserExtension), ntStatus);
 	return ntStatus;
 }
 
